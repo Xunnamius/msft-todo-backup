@@ -191,7 +191,7 @@
     "strip-ansi": "^7.0.1",
     "text-extensions": "^2.4.0",
     "tsconfig-replace-paths": "^0.0.14",
-    "type-fest": "^3.6.1",
+    "type-fest": "^3.7.0",
     "typedoc": "^0.23.28",
     "typedoc-plugin-markdown": "^3.14.0",
     "typescript": "^5.0.2",
