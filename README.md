@@ -26,8 +26,8 @@ title, attachments, and checklist items (so-called "steps").
 Also supports unattended backups, throttling, and automatic retrying out of the
 box.
 
-However, while attachment and checklist items are backed up, linked resources
-and extensions are _not_ backed up.
+However, while attachment and checklist items are backed up and can be restored,
+linked resources and extensions are ignored.
 
 ---
 
@@ -109,7 +109,7 @@ You can backup all your lists:
 msft-todo-backup backup
 ```
 
-Or you can backup specific lists:
+Or you can backup specific lists by their display name:
 
 ```shell
 msft-todo-backup backup list-1 list-2 list-3
@@ -168,9 +168,9 @@ Or you can restore from a specific backup if you have multiple backups saved
 
 ```shell
 # Restore from the second stored backup (one-indexed)
-msft-todo-backup restore list-1 list-2 list-3 --from-num-backup 2
+msft-todo-backup restore list-1 list-2 list-3 --from-backup-index 2
 # Restore from the first stored backup, making the following two lines equivalent
-msft-todo-backup restore list-1 list-2 list-3 --from-num-backup 1
+msft-todo-backup restore list-1 list-2 list-3 --from-backup-index 1
 msft-todo-backup restore list-1 list-2 list-3
 ```
 
@@ -180,7 +180,7 @@ interrupted or fails, it can be safely restarted without worrying about
 duplicates or missing/lost/partial data.
 
 Further, lists that already exist (display names match exactly) will not be
-duplicated. Similarly, tasks with the same id will not be duplicated.
+duplicated. Similarly, tasks with the same ID will not be duplicated.
 
 ### Enumerating and Deleting Stored Backups
 
@@ -198,15 +198,16 @@ msft-todo-backup clean
 ```
 
 Enumerating backups with `msft-todo-backup list` will also reveal the internal
-ID of each backed up list, which can be provided when executing commands in lieu
-of the list's display name. This is useful when two lists might have the same
-name. When two or more lists have the same name, referring to that name when
-executing a restoration operation will result in an error. However, referring to
-the list using its internal ID will allow the operation to proceed normally.
+index of each backed up list, which can be provided when executing commands in
+lieu of the list's display name. This is useful when two lists might have the
+same name. When two or more lists have the same name, referring to that name
+when executing a restoration operation will result in an error. However,
+referring to the list using its internal index will allow the operation to
+proceed normally.
 
-For example, suppose your account has the following lists: "list-A" (id=0),
-"list-B" (id=1), and a second "list-A" (id=2). The following command, which
-attempts to restore _only the second list-A_, will fail:
+For example, suppose your account has the following lists: "list-A" (index=1),
+"list-B" (index=2), and a second "list-A" (index=3). The following command,
+which attempts to restore _only the second list-A_, will fail:
 
 ```shell
 # Fails due to ambiguity
@@ -218,9 +219,9 @@ ignoring the first:
 
 ```shell
 # Succeeds
-msft-todo-backup restore --id 2
-# You can also specify multiple IDs
-msft-todo-backup restore --id 1 --id=2
+msft-todo-backup restore --list-index 3
+# You can also specify multiple IDs (one-indexed)
+msft-todo-backup restore --list-index 2 --list-index=3
 ```
 
 When two or more lists have the same name, referring to that name when executing
