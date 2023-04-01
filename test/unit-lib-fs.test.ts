@@ -1,12 +1,12 @@
 /* eslint-disable jest/no-conditional-in-test */
 import fs from 'node:fs/promises';
-import { writeFile } from 'node:fs';
+import { isNativeError } from 'node:util/types';
 import { toss } from 'toss-expression';
-import { asMockedFunction, type AnyFunction } from '@xunnamius/jest-types';
 
 import { useMockDateNow, mockDateNowMs } from 'multiverse/jest-mock-date';
 import * as lib from 'universe/lib/fs';
-import { isNativeError } from 'node:util/types';
+
+import type { AnyFunction } from '@xunnamius/jest-types';
 
 // eslint-disable-next-line jest/require-hook
 useMockDateNow();
