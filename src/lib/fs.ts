@@ -3,16 +3,13 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { isNativeError } from 'node:util/types';
 
+import type { BackupData } from 'types/global';
 import type { UnixEpochMs } from '@xunnamius/types';
-import type { TodoTaskList } from '@microsoft/microsoft-graph-types';
 
 const storageDirectory = path.resolve(os.homedir(), 'msft-todo-backups');
 let cachedMetadata: BackupMetadata = [];
 
 type Index = number;
-
-export type BackupData = BackupListData[];
-export type BackupListData = TodoTaskList;
 
 export type BackupMetadata = BackupFileMetadata[];
 
