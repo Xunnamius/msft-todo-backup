@@ -179,8 +179,53 @@ or deleted; all operations are append-only. Therefore, if the restoration is
 interrupted or fails, it can be safely restarted without worrying about
 duplicates or missing/lost/partial data.
 
-Further, lists that already exist (display names match exactly) will not be
-duplicated. Similarly, tasks with the same ID will not be duplicated.
+Further, lists with the same display name will not be recreated. Similarly,
+tasks with the same body contents and content type will not be recreated.
+
+#### Dangerous Restoration
+
+In addition to the default [`--deep-deduplication` mode][5], there are three
+other non-default "dangerous" restoration modes:
+
+##### `--shallow-deduplication`
+
+Unlike `--deep-deduplication`, which deduplicates using list display names and
+task bodies, `--shallow-deduplication` deduplicates using the IDs of lists and
+tasks. For accounts with a lot of data-heavy tasks, this can speed things up
+somewhat.
+
+However, since the creation of new lists/tasks results in those lists/tasks
+having new IDs, restoration operations using `--shallow-deduplication` are
+**NOT** idempotent and **NOT** resumable if interrupted. That is: executing two
+`--shallow-deduplication` restoration operations to the same account
+back-to-back without creating a new backup before the second restoration
+operation will _always_ result in duplicates.
+
+##### `--no-deduplication`
+
+No checks for duplicate lists or tasks are performed before restoration. When
+using this mode, _all_ lists and tasks will always be restored separately from
+the lists and tasks that already exist in the account. This will likely result
+in many duplicates and will require manual resolution and list merging by the
+user.
+
+```shell
+msft-todo-backup restore "My Special List" --no-deduplication
+```
+
+##### `--clean-before-restore`
+
+All existing lists and tasks will be deleted before the restoration process is
+performed. When using this mode, **all existing lists and tasks in the entire
+account will be irrecoverably destroyed**. Afterwards, the restoration process
+will proceed as usual. While useful for performing a sort of "system restore" to
+return your lists back to a previous state in time, since this mode involves
+deletion of data, it is extremely dangerous and should be invoked only with the
+utmost caution.
+
+```shell
+msft-todo-backup restore --clean-before-restore
+```
 
 ### Enumerating and Deleting Stored Backups
 
@@ -234,36 +279,6 @@ named "list-A":
 msft-todo-backup backup list-A
 ```
 
-#### Destructive Restoration
-
-There are two non-default "destructive" restoration modes:
-
-##### `--no-deduplication`
-
-No checks for duplicate lists or tasks are performed before restoration. When
-using this mode, _all_ lists and tasks will always be restored separately from
-the lists and tasks that already exist in the account. This will likely result
-in many duplicates and will require manual resolution and list merging by the
-user.
-
-```shell
-msft-todo-backup restore "My Special List" --no-deduplication
-```
-
-##### `--clean-before-restore`
-
-All existing lists and tasks will be deleted before the restoration process is
-performed. When using this mode, **all existing lists and tasks in the entire
-account will be irrecoverably destroyed**. Afterwards, the restoration process
-will proceed as usual. While useful for performing a sort of "system restore" to
-return your lists back to a previous state in time, since this mode involves
-deletion of data, it is extremely dangerous and should be invoked only with the
-utmost caution.
-
-```shell
-msft-todo-backup restore --clean-before-restore
-```
-
 ## Appendix
 
 Further documentation can be found under [`docs/`][x-repo-docs].
@@ -284,7 +299,7 @@ requires new lists to be created will result in said lists not being added to
 any task list groups. Deduplicated restorations (the default kind of
 restoration), when adding tasks to existing task lists, are unaffected by this
 limitation. The old beta version of Microsoft's Graph API did have a
-[taskGroups][5] endpoint, but it looks like it was removed for some reason.
+[taskGroups][6] endpoint, but it looks like it was removed for some reason.
 Perhaps this can be revisited at a later point. PRs welcome!
 
 Fourth, linked resources and extensions are _not_ backed up, though the API
@@ -293,12 +308,12 @@ with it though since the functionality would be of limited use to me. PRs
 welcome!
 
 Finally, note that moving a task from one list to another will change its ID.
-This can result in duplicates during restorations in certain edge cases even
-with de-duplication enabled.
+This can result in unexpected duplicates during restorations when using
+non-default restoration modes.
 
 ### Inspiration
 
-Thanks to [Dan O'Sullivan][6] for giving me an idea of how Microsoft's Graph API
+Thanks to [Dan O'Sullivan][7] for giving me an idea of how Microsoft's Graph API
 works and the knowledge that backing up Microsoft Todo tasks was even possible.
 
 ### Published Package Details
@@ -453,7 +468,8 @@ specification. Contributions of any kind welcome!
 [3]: https://opensource.com/article/17/11/how-use-cron-linux
 [4]:
   https://www.windowscentral.com/how-create-automated-task-using-task-scheduler-windows-10
-[5]:
-  https://learn.microsoft.com/en-us/graph/api/outlookuser-list-taskgroups?view=graph-rest-beta&tabs=http
+[5]: #restoring-lists
 [6]:
+  https://learn.microsoft.com/en-us/graph/api/outlookuser-list-taskgroups?view=graph-rest-beta&tabs=http
+[7]:
   https://blog.osull.com/2020/09/14/backup-migrate-microsoft-to-do-tasks-with-powershell-and-microsoft-graph
