@@ -104,7 +104,7 @@
     "@types/debug": "^4.1.7",
     "@types/jest": "^29.5.0",
     "@types/lodash.mergewith": "^4.6.7",
-    "@typescript-eslint/eslint-plugin": "^5.57.0",
+    "@typescript-eslint/eslint-plugin": "^5.57.1",
     "@typescript-eslint/parser": "^5.57.0",
     "@xunnamius/conventional-changelog-projector": "^1.2.1",
     "@xunnamius/jest-types": "^1.1.3",
