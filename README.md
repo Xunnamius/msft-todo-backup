@@ -70,36 +70,41 @@ npx msft-todo-backup ...
 > For a full list of available commands and flags, use
 > `msft-todo-backup --help`.
 
-Before using `msft-todo-backup`, you'll have to acquire a Microsoft Graph client
-ID and secret:
+Before using `msft-todo-backup`, you'll have to acquire a Microsoft Graph tenant
+(directory) and client (application) ID:
 
-1. [Create a new app registration][1] associated with the (likely personal)
-   account that has your task lists. No redirect URI should be configured.
-   Microsoft has more detailed instructions [here][2]. Copy the Application
-   (client) ID and Directory (tenant) ID when done.
+1. [Create a free new app registration][1] by clicking "New registration".
+   Select "Only associate the new app with your personal account". Name the
+   application "msft-todo-backup". For _Supported account types_ you must select
+   "Accounts in any organizational directory (Any Azure AD directory -
+   Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)". No redirect
+   URI should be configured. Click "Register". Once you're taken to your app's
+   dashboard, copy the Application (client) ID and Directory (tenant) ID.
+
+   > Microsoft has more detailed instructions on setting up a new app
+   > registration [here][2].
 
 2. Once the new app registration is created, it must be configured. Using the
-   sidebar, click "API permissions" > "Add a permission" > "Microsoft Graph" >
-   scroll down to "Tasks," click it, and ensure "Tasks.ReadWrite" is checked.
-   Click "Add permissions" afterwards.
+   sidebar, click "Authentication" > scroll down to _Advanced settings_ and set
+   _Allow public client flows_ to "Yes". Click "Save".
 
-3. Using the same sidebar, click "Certificates & secrets" > "New client
-   secret" > give it whatever expiration date makes sense. Click "Add"
-   afterwards. Make sure to copy the value immediately after creating the client
-   secret because once you navigate away from the page it will be gone forever.
+3. Register your app IDs with the CLI tool by running
+   `msft-todo-backup authenticate`. You'll have to provide the Application ID
+   and Directory ID, after which you'll be presented with instructions on how to
+   link up with your Microsoft account using the device login flow. The IDs will
+   be saved to `~/msft-todo-backups/auth.json` while your sensitive account
+   access tokens will be encrypted and stored elsewhere.
 
-4. Register your app authentication information with the CLI tool by running
-   `msft-todo-backup authenticate`. You'll have to provide the Application ID,
-   Client secret, and Directory ID. It will be saved to
-   `~/msft-todo-backups/auth.json`.
+Note that, if you do not run msft-todo-backup anywhere 30 to 90 days after
+authenticating (or if you revoke access to the msft-todo-backup app from your
+Microsoft account), your access/refresh tokens may expire. If this happens, just
+rerun `msft-todo-backup authenticate`.
 
-Note that, once the client secret expires, you'll have to create a new one and
-rerun `msft-todo-backup authenticate` before further backups can be created.
-
-This step is necessary because interacting with the Microsoft Graph API to
-backup your tasks can be an intensive and data-heavy process, especially if you
-have a lot of files attached to your tasks, so creating a shared API service
-would quickly run into throttling and bandwidth limit issues.
+> Manually registering a new application is necessary because interacting with
+> the Microsoft Graph API to backup your tasks can be an intensive and
+> data-heavy process, especially if you have a lot of files attached to your
+> tasks. Hence, creating a shared API service would quickly run into throttling
+> and bandwidth limit issues.
 
 ### Backing up Lists
 
@@ -144,10 +149,11 @@ you want to keep it.
 #### Automatic Backups
 
 Once `msft-todo-backup authenticate` has been run successfully at least once,
-backups can be performed automatically in the background without you having to
-do anything. For example, to backup your Microsoft Todo tasks once a day, you
-can run `msft-todo-backup backup --keep-num-backups 5` as a [daily cron][3]
-(Linux) or via the [task scheduler][4] (Windows).
+and your access/refresh tokens have not expired, backups can be performed
+automatically in the background without you having to do anything. For example,
+to backup your Microsoft Todo tasks once a day, you can run
+`msft-todo-backup backup --keep-num-backups 5` as a [daily cron][3] (Linux) or
+via the [task scheduler][4] (Windows).
 
 ### Restoring Lists
 
@@ -464,7 +470,7 @@ specification. Contributions of any kind welcome!
 [1]:
   https://aad.portal.azure.com#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/RegisteredApps
 [2]:
-  https://learn.microsoft.com/en-us/azure/active-directory-b2c/microsoft-graph-get-started?tabs=app-reg-ga#register-management-application
+  https://learn.microsoft.com/en-us/graph/auth-register-app-v2#register-an-application
 [3]: https://opensource.com/article/17/11/how-use-cron-linux
 [4]:
   https://www.windowscentral.com/how-create-automated-task-using-task-scheduler-windows-10
