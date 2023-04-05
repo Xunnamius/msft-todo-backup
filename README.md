@@ -95,10 +95,18 @@ Before using `msft-todo-backup`, you'll have to acquire a Microsoft Graph tenant
    be saved to `~/msft-todo-backups/auth.json` while your sensitive account
    access tokens will be encrypted and stored elsewhere.
 
-Note that, if you do not run msft-todo-backup anywhere 30 to 90 days after
+Note that, if you do not run msft-todo-backup anywhere from 30 to 90 days after
 authenticating (or if you revoke access to the msft-todo-backup app from your
 Microsoft account), your access/refresh tokens may expire. If this happens, just
 rerun `msft-todo-backup authenticate`.
+
+Also note that, for some reason, you must complete authentication using your
+actual account. You cannot use the incredibly convenient "Sign in with another
+account" as of this writing. For example, you cannot authenticate successfully
+using your GitHub account to login to your Microsoft account. If you attempt to
+authenticate by entering the device code in your browser but are not presented
+with a permissions approval screen for the "msft-todo-backup" app, you must
+authenticate using your real account credentials instead.
 
 > Manually registering a new application is necessary because interacting with
 > the Microsoft Graph API to backup your tasks can be an intensive and
