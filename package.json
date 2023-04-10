@@ -199,7 +199,7 @@
     "toss-expression": "^0.1.2",
     "tsconfig-replace-paths": "^0.0.14",
     "type-fest": "^3.8.0",
-    "typedoc": "^0.23.28",
+    "typedoc": "^0.24.1",
     "typedoc-plugin-markdown": "^3.14.0",
     "typescript": "^5.0.3",
     "unique-filename": "^3.0.0"
