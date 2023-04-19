@@ -216,6 +216,10 @@ having new IDs, restoration operations using `--shallow-deduplication` are
 back-to-back without creating a new backup before the second restoration
 operation will _always_ result in duplicates.
 
+```shell
+msft-todo-backup restore "My Special List" --shallow-deduplication
+```
+
 ##### `--no-deduplication`
 
 No checks for duplicate lists or tasks are performed before restoration. When
@@ -223,6 +227,9 @@ using this mode, _all_ lists and tasks will always be restored separately from
 the lists and tasks that already exist in the account. This will likely result
 in many duplicates and will require manual resolution and list merging by the
 user.
+
+You can use this mode to create an exact copy of a list. For example, to make a
+copy of "My Special List", you could issue the following command:
 
 ```shell
 msft-todo-backup restore "My Special List" --no-deduplication
