@@ -17,14 +17,15 @@ precious Microsoft Todo tasks for the paranoid among us that aren't willing to
 risk a decade of notes on the whims and stability of Microsoft's services.
 
 Currently, one or more lists and all of their tasks can be exported. For lists,
-their display names are exported. For tasks, the following are exported: body,
-body last modified date and time, categories, completed date and time, created
-date and time, due date and time, unique id, importance, last modified date and
-time, recurrence pattern, reminder date and time, start date and time, status,
-title, attachments, and checklist items (so-called "steps").
+their display names and unique id are exported. For tasks, the following are
+exported: body, body last modified date and time, categories, completed date and
+time, created date and time, due date and time, unique id, importance, last
+modified date and time, recurrence pattern, reminder date and time, start date
+and time, status, title, attachments, and checklist items (so-called "steps").
 
-Also supports unattended backups, throttling, and automatic retrying out of the
-box.
+This tool was built using async iterators and streams to ensure proper function
+in low-memory environments (i.e. 1-2G RAM odroids). Additionally, unattended
+backups, throttling, and automatic retrying are supported out of the box.
 
 However, while attachment and checklist items are backed up and can be restored,
 linked resources and extensions are ignored.
