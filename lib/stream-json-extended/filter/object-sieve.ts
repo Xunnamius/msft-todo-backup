@@ -1,4 +1,6 @@
 import { Transform, type TransformOptions } from 'node:stream';
+import { isNativeError } from 'node:util/types';
+
 import isDeepSubset from 'lodash.ismatch';
 import { chain } from 'stream-chain';
 
@@ -9,6 +11,8 @@ import {
   packedEntrySymbol,
   useDepthTracking
 } from 'multiverse/stream-json-extended';
+
+import { makeSafeCallback } from 'multiverse/stream-json-extended/util/make-safe-callback';
 
 import type { JsonValue } from 'type-fest';
 
@@ -64,7 +68,7 @@ export function objectSieve({
   pathSeparator?: string;
 }) {
   const { getDepth, updateDepth } = useDepthTracking();
-  const buffer: (JsonToken | JsonPackedEntryToken)[] = [];
+  const tokenBuffer: (JsonToken | JsonPackedEntryToken)[] = [];
   const ownerSymbol = Symbol('owner');
 
   let isOpen = false;
@@ -73,15 +77,15 @@ export function objectSieve({
 
   const releaseBuffer = function (this: Transform) {
     // ! Is this memory-safe? Probably, because we're moving data from
-    // ! one cache (buffer) to another (internal stream buffer)
-    for (let index = 0; index < buffer.length; ++index) {
-      this.push(buffer.shift());
+    // ! one cache (tokenBuffer) to another (internal stream buffer)
+    for (let index = 0; index < tokenBuffer.length; ++index) {
+      this.push(tokenBuffer.shift());
     }
   };
 
   const discardBuffer = function () {
     // ? Making sure the objects in the array are garbage collected
-    buffer.splice(0, buffer.length);
+    tokenBuffer.splice(0, tokenBuffer.length);
   };
 
   const pipeline = chain([
@@ -90,67 +94,73 @@ export function objectSieve({
       ...transformOptions,
       objectMode: true,
       transform(chunk: JsonToken | JsonPackedEntryToken, _encoding, callback) {
-        const isOwnPackedEntry =
-          chunk.name === packedEntrySymbol && chunk.owner === ownerSymbol;
+        const safeCallback = makeSafeCallback(callback);
 
-        updateDepth(chunk as JsonToken);
+        try {
+          const isOwnPackedEntry =
+            chunk.name === packedEntrySymbol && chunk.owner === ownerSymbol;
 
-        if (getDepth() === 1 && chunk.name === 'startObject') {
-          isDiscarding = false;
-          isReleasing = false;
-        } else if (getDepth() === 0) {
-          isDiscarding = false;
-          isReleasing = true;
-        }
+          updateDepth(chunk as JsonToken);
 
-        if (isOpen || isReleasing) {
-          releaseBuffer.call(this);
-
-          if (!isOwnPackedEntry) {
-            this.push(chunk);
+          if (getDepth() === 1 && chunk.name === 'startObject') {
+            isDiscarding = false;
+            isReleasing = false;
+          } else if (getDepth() === 0) {
+            isDiscarding = false;
+            isReleasing = true;
           }
 
-          return callback(null);
-        }
+          if (isOpen || isReleasing) {
+            releaseBuffer.call(this);
 
-        if (!isDiscarding) {
-          if (isOwnPackedEntry) {
-            const entryFilter = filter.find(([key]) => key === chunk.matcher);
-
-            if (entryFilter) {
-              const [, entryValueFilter] = entryFilter;
-
-              const passesValueFilterFn =
-                typeof entryValueFilter === 'function' && entryValueFilter(chunk.value);
-
-              const isADeepSubset =
-                chunk.value !== null &&
-                entryValueFilter !== null &&
-                typeof chunk.value === 'object' &&
-                typeof entryValueFilter === 'object' &&
-                isDeepSubset(chunk.value, entryValueFilter);
-
-              if (
-                chunk.value === entryValueFilter ||
-                passesValueFilterFn ||
-                isADeepSubset
-              ) {
-                isReleasing = true;
-                releaseBuffer.call(this);
-              }
-
-              // ? This object does not satisfy any filters
-              else if (filter.length <= 1) {
-                isDiscarding = true;
-                discardBuffer();
-              }
+            if (!isOwnPackedEntry) {
+              this.push(chunk);
             }
-          } else {
-            buffer.push(chunk);
-          }
-        }
 
-        callback(null);
+            return callback(null);
+          }
+
+          if (!isDiscarding) {
+            if (isOwnPackedEntry) {
+              const entryFilter = filter.find(([key]) => key === chunk.matcher);
+
+              if (entryFilter) {
+                const [, entryValueFilter] = entryFilter;
+
+                const passesValueFilterFn =
+                  typeof entryValueFilter === 'function' && entryValueFilter(chunk.value);
+
+                const isADeepSubset =
+                  chunk.value !== null &&
+                  entryValueFilter !== null &&
+                  typeof chunk.value === 'object' &&
+                  typeof entryValueFilter === 'object' &&
+                  isDeepSubset(chunk.value, entryValueFilter);
+
+                if (
+                  chunk.value === entryValueFilter ||
+                  passesValueFilterFn ||
+                  isADeepSubset
+                ) {
+                  isReleasing = true;
+                  releaseBuffer.call(this);
+                }
+
+                // ? This object does not satisfy any filters
+                else if (filter.length <= 1) {
+                  isDiscarding = true;
+                  discardBuffer();
+                }
+              }
+            } else {
+              tokenBuffer.push(chunk);
+            }
+          }
+
+          callback(null);
+        } catch (error) {
+          safeCallback(isNativeError(error) ? error : new Error(String(error)));
+        }
       }
     })
   ]) as ReturnType<typeof chain> & {

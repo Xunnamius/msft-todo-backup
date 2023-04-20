@@ -1,6 +1,7 @@
 import Assembler, { type AssemblerOptions } from 'stream-json/Assembler';
 
-import type { JsonToken, JsonTokenName } from 'multiverse/stream-json-extended';
+import type { JsonTokenName } from 'multiverse/stream-json-extended';
+import type { AnyFunction } from '@xunnamius/types';
 
 /**
  * Options used to configure {@link FullAssembler}.
@@ -19,40 +20,6 @@ export type JsonStreamedAssembledTokenName = Extract<
 type EmptyAssemblerMethod = () => void;
 type ParameterizedAssemblerMethod = (value: string) => void;
 
-function beginAssemblingToken(this: FullAssembler) {
-  this.wasDone = this.done;
-  // ? This is required because the @types package is suboptimal
-  (this.done as boolean) = false;
-}
-
-function appendToAssembledString(this: FullAssembler, value: string) {
-  this.assembledString += value;
-}
-
-function finalizeAssembledToken(
-  this: FullAssembler,
-  method: JsonStreamedAssembledTokenName
-) {
-  // ? This is required because the @types package is suboptimal.
-  // ? Also, this is required to be done BEFORE calling the appropriate method.
-  (this.done as boolean) = this.wasDone;
-
-  this[method](this.assembledString);
-  this.previouslyAssembledToken = method;
-  this.assembledString = '';
-}
-
-function skipMethodCallIfPreviouslyAssembled(
-  this: FullAssembler,
-  superMethod: ParameterizedAssemblerMethod,
-  superMethodName: JsonStreamedAssembledTokenName,
-  value: string
-) {
-  if (this.previouslyAssembledToken !== superMethodName) {
-    superMethod(value);
-  }
-}
-
 /**
  * An extension of {@link Assembler} that, unlike the superclass, handles _all_
  * streamed and packed token types.
@@ -60,7 +27,8 @@ function skipMethodCallIfPreviouslyAssembled(
  * See https://github.com/uhop/stream-json/wiki/Assembler for details.
  */
 export class FullAssembler extends Assembler {
-  protected previouslyAssembledToken: JsonStreamedAssembledTokenName | undefined =
+  // ? Tracks the previously assembled token name but only if it was streamed
+  protected previouslyAssembledStreamedToken: JsonStreamedAssembledTokenName | undefined =
     undefined;
   protected assembledString = '';
   protected wasDone = true;
@@ -87,67 +55,103 @@ export class FullAssembler extends Assembler {
   constructor(options?: FullAssemblerOptions) {
     super(options);
 
-    this.startNumber = beginAssemblingToken.bind(this);
-    this.startString = beginAssemblingToken.bind(this);
-    this.startKey = beginAssemblingToken.bind(this);
+    this.startNumber = withPreviousTokenTracking.call(this, beginAssemblingToken);
+    this.startString = withPreviousTokenTracking.call(this, beginAssemblingToken);
+    this.startKey = withPreviousTokenTracking.call(this, beginAssemblingToken);
 
-    this.numberChunk = appendToAssembledString.bind(this);
-    this.stringChunk = appendToAssembledString.bind(this);
+    this.numberChunk = withPreviousTokenTracking.call(this, appendToAssembledString);
+    this.stringChunk = withPreviousTokenTracking.call(this, appendToAssembledString);
 
     this.endNumber = finalizeAssembledToken.bind(this, 'numberValue');
     this.endString = finalizeAssembledToken.bind(this, 'stringValue');
     this.endKey = finalizeAssembledToken.bind(this, 'keyValue');
 
-    this.numberValue = skipMethodCallIfPreviouslyAssembled.bind(
+    this.numberValue = withPreviousTokenTracking.call(
       this,
-      //@ts-expect-error: @types package is missing some superclass methods
-      super.numberValue.bind(this),
-      'numberValue'
+      skipMethodCallIfPreviouslyAssembled.bind(
+        this,
+        //@ts-expect-error: @types package is missing some superclass methods
+        super.numberValue.bind(this),
+        'numberValue'
+      )
     );
 
-    this.stringValue = skipMethodCallIfPreviouslyAssembled.bind(
+    this.stringValue = withPreviousTokenTracking.call(
       this,
-      //@ts-expect-error: @types package is missing some superclass methods
-      super.stringValue.bind(this),
-      'stringValue'
+      skipMethodCallIfPreviouslyAssembled.bind(
+        this,
+        //@ts-expect-error: @types package is missing some superclass methods
+        super.stringValue.bind(this),
+        'stringValue'
+      )
     );
 
-    this.keyValue = skipMethodCallIfPreviouslyAssembled.bind(
+    this.keyValue = withPreviousTokenTracking.call(
       this,
-      //@ts-expect-error: @types package is missing some superclass methods
-      super.keyValue.bind(this),
-      'keyValue'
+      skipMethodCallIfPreviouslyAssembled.bind(
+        this,
+        //@ts-expect-error: @types package is missing some superclass methods
+        super.keyValue.bind(this),
+        'keyValue'
+      )
     );
 
     //@ts-expect-error: @types package is missing some superclass methods
-    this.startObject = super.startObject.bind(this);
+    this.startObject = withPreviousTokenTracking.call(this, super.startObject);
     //@ts-expect-error: @types package is missing some superclass methods
-    this.endObject = super.endObject.bind(this);
+    this.endObject = withPreviousTokenTracking.call(this, super.endObject);
     //@ts-expect-error: @types package is missing some superclass methods
-    this.startArray = super.startArray.bind(this);
+    this.startArray = withPreviousTokenTracking.call(this, super.startArray);
     //@ts-expect-error: @types package is missing some superclass methods
-    this.endArray = super.endArray.bind(this);
+    this.endArray = withPreviousTokenTracking.call(this, super.endArray);
     //@ts-expect-error: @types package is missing some superclass methods
-    this.nullValue = super.nullValue.bind(this);
+    this.nullValue = withPreviousTokenTracking.call(this, super.nullValue);
     //@ts-expect-error: @types package is missing some superclass methods
-    this.trueValue = super.trueValue.bind(this);
+    this.trueValue = withPreviousTokenTracking.call(this, super.trueValue);
     //@ts-expect-error: @types package is missing some superclass methods
-    this.falseValue = super.falseValue.bind(this);
+    this.falseValue = withPreviousTokenTracking.call(this, super.falseValue);
   }
+}
 
-  /**
-   * This is a helper method, which encapsulates a common pattern used to
-   * consume a token. It returns the instance for possible chaining.
-   */
-  consume(chunk: JsonToken) {
-    super.consume(chunk);
+function beginAssemblingToken(this: FullAssembler) {
+  this.wasDone = this.done;
+  // ? This is required because the @types package is suboptimal
+  (this.done as boolean) = false;
+}
 
+function appendToAssembledString(this: FullAssembler, value: string) {
+  this.assembledString += value;
+}
+
+function finalizeAssembledToken(
+  this: FullAssembler,
+  method: JsonStreamedAssembledTokenName
+) {
+  // ? This is required because the @types package is suboptimal.
+  // ? Also, this is required to be done BEFORE calling the appropriate method.
+  (this.done as boolean) = this.wasDone;
+
+  this[method](this.assembledString);
+  this.previouslyAssembledStreamedToken = method;
+  this.assembledString = '';
+}
+
+function skipMethodCallIfPreviouslyAssembled(
+  this: FullAssembler,
+  superMethod: ParameterizedAssemblerMethod,
+  superMethodName: JsonStreamedAssembledTokenName,
+  value: string
+) {
+  if (this.previouslyAssembledStreamedToken !== superMethodName) {
+    superMethod(value);
+  }
+}
+
+function withPreviousTokenTracking<T extends AnyFunction>(this: FullAssembler, fn: T) {
+  return (...parameters: Parameters<T>) => {
+    fn.apply(this, parameters);
     // ? This prevents pipelines made of streams with mixed configs (e.g. some
     // ? packed, some streamed, some both) from causing duplicates or misses.
-    if (!(['endNumber', 'endString', 'endKey'] as JsonTokenName[]).includes(chunk.name)) {
-      this.previouslyAssembledToken = undefined;
-    }
-
-    return this;
-  }
+    this.previouslyAssembledStreamedToken = undefined;
+  };
 }

@@ -13,11 +13,11 @@ export function useStackKeyTracking() {
   let previousToken: JsonToken | undefined = undefined;
   let keyBuffer: string | undefined = undefined;
 
-  function getStack() {
+  function getStack(this: void) {
     return [...stack];
   }
 
-  function getHead(offset = 0) {
+  function getHead(this: void, offset = 0) {
     return stack.at(-1 - offset);
   }
 
@@ -28,36 +28,31 @@ export function useStackKeyTracking() {
    * (representing a "push") only if we're currently evaluating an array and
    * we're enumerating its members.
    */
-  function pushHead(options: { incrementIfStackHeadIsArray: boolean }): void;
+  function pushHead(this: void, options: { incrementIfStackHeadIsArray: boolean }): void;
   /**
    * Updates the head of the stack.
    *
    * When called in this form, `value` will be pushed onto the stack, becoming
    * the new head.
    */
-  function pushHead(options: { value: -1 | null }): void;
-  function pushHead({
-    incrementIfStackHeadIsArray,
-    value
-  }: {
-    incrementIfStackHeadIsArray?: boolean;
-    value?: -1 | null;
-  }): void {
-    if (incrementIfStackHeadIsArray !== undefined) {
-      if (incrementIfStackHeadIsArray && typeof getHead() === 'number') {
+  function pushHead(this: void, options: { value: -1 | null }): void;
+  function pushHead(
+    this: void,
+    options: { incrementIfStackHeadIsArray: boolean } | { value: -1 | null }
+  ): void {
+    if ('incrementIfStackHeadIsArray' in options) {
+      if (options.incrementIfStackHeadIsArray && typeof getHead() === 'number') {
         (stack[stack.length - 1] as number) += 1;
       }
-    } else if (value !== undefined) {
-      stack.push(value);
     } else {
-      assert.fail();
+      stack.push(options.value);
     }
   }
 
   /**
    * Updates the head of the stack, replacing it with `value`.
    */
-  function setHead({ value }: { value: string }) {
+  function setHead(this: void, { value }: { value: string }) {
     stack[stack.length - 1] = value;
   }
 
@@ -65,11 +60,11 @@ export function useStackKeyTracking() {
    * Removes the head of the stack and returns it. If the stack is empty,
    * `undefined` is returned and the stack is not modified.
    */
-  function popHead() {
+  function popHead(this: void) {
     return stack.pop();
   }
 
-  function updateStack(currentToken: JsonToken) {
+  function updateStack(this: void, currentToken: JsonToken) {
     switch (currentToken.name) {
       case 'startObject':
       case 'startArray':
@@ -170,6 +165,11 @@ export function useStackKeyTracking() {
      *   - When evaluating the first entry of the second element: `[1, 'b']`
      *   - When evaluating the end of the second element: `[1]`
      *   - When evaluating the end of the array: `[]`
+     *
+     * Note that calling `getStack` in the middle of evaluating a streamed key
+     * might result in stale data being returned. For accurate results, ensure
+     * `getStack` is called on value boundaries (e.g. after "endKey" is
+     * consumed).
      */
     getStack,
     /**

@@ -13,13 +13,13 @@ export function useDepthTracking() {
      *
      * For example, for `[{a: 1}]` when assembling `1`, the depth will be `2`.
      */
-    getDepth() {
+    getDepth(this: void) {
       return depth;
     },
     /**
      * Updates the object depth depending on the provided {@link JsonToken}.
      */
-    updateDepth(jsonToken: JsonToken) {
+    updateDepth(this: void, jsonToken: JsonToken) {
       switch (jsonToken.name) {
         case 'startObject':
         case 'startArray': {

@@ -1,10 +1,12 @@
 import { type Readable, Transform, type TransformOptions } from 'node:stream';
+import { isNativeError } from 'node:util/types';
 
 import { chain } from 'stream-chain';
 import { ignore } from 'stream-json/filters/Ignore';
 
 import { escapeRegExp } from 'multiverse/stream-json-extended/util/escape-regexp';
 import { type JsonToken, useStackKeyTracking } from 'multiverse/stream-json-extended';
+import { makeSafeCallback } from 'multiverse/stream-json-extended/util/make-safe-callback';
 
 /**
  * Injects a stream of {@link JsonToken}s representing a new entry (key-value
@@ -70,65 +72,71 @@ export function injectEntry({
     ...transformOptions,
     objectMode: true,
     transform(chunk: JsonToken, _encoding, callback) {
-      updateStack(chunk);
-      const stack = getStack();
+      const safeCallback = makeSafeCallback(callback);
 
-      if (waitingForTheEnd) {
-        if (chunk.name === 'endObject') {
-          waitingForTheEnd = false;
-          let calledCallback = false;
+      try {
+        updateStack(chunk);
+        const stack = getStack();
 
-          const onData = function (this: typeof injectionStream, chunk: unknown) {
-            if (!this.push(chunk)) {
-              valueTokenStream.pause();
-              // ? Handle backpressure during unbounded chunk inflation
-              // * https://stackoverflow.com/a/73474849/1367414
-              this.once('data', () => valueTokenStream.resume());
+        if (waitingForTheEnd) {
+          if (chunk.name === 'endObject') {
+            waitingForTheEnd = false;
+            let calledCallback = false;
+
+            const onData = function (this: typeof injectionStream, chunk: unknown) {
+              if (!this.push(chunk)) {
+                valueTokenStream.pause();
+                // ? Handle backpressure during unbounded chunk inflation
+                // * https://stackoverflow.com/a/73474849/1367414
+                this.once('data', () => valueTokenStream.resume());
+              }
+            };
+
+            const onEnd = function (error?: Error | null) {
+              calledCallback = true;
+              valueTokenStream.removeListener('data', onData);
+              valueTokenStream.removeListener('end', onEnd);
+              valueTokenStream.removeListener('error', onEnd);
+              callback(error ?? null);
+            };
+
+            valueTokenStream.on('error', (error) => onEnd(error));
+            valueTokenStream.on('end', () => onEnd());
+            valueTokenStream.on('data', onData);
+
+            if (
+              !calledCallback &&
+              (valueTokenStream.readableEnded || valueTokenStream.readableAborted)
+            ) {
+              onEnd();
             }
-          };
 
-          const onEnd = function (error?: Error | null) {
-            calledCallback = true;
-            valueTokenStream.removeListener('data', onData);
-            valueTokenStream.removeListener('end', onEnd);
-            valueTokenStream.removeListener('error', onEnd);
-            callback(error ?? null);
-          };
-
-          valueTokenStream.on('error', (error) => onEnd(error));
-          valueTokenStream.on('end', () => onEnd());
-          valueTokenStream.on('data', onData);
-
-          if (
-            !calledCallback &&
-            (valueTokenStream.readableEnded || valueTokenStream.readableAborted)
-          ) {
-            onEnd();
+            return;
           }
+        } else {
+          const stackPath = stack.slice(0, -1).join(pathSeparator);
+          const isEvaluatingAnObjectRoot =
+            stack.length >= 1 && typeof stack[0] !== 'number';
 
-          return;
-        }
-      } else {
-        const stackPath = stack.slice(0, -1).join(pathSeparator);
-        const isEvaluatingAnObjectRoot =
-          stack.length >= 1 && typeof stack[0] !== 'number';
-
-        if (isEvaluatingAnObjectRoot) {
-          if (injectionPoint === undefined) {
-            if (stack.length === 1) {
+          if (isEvaluatingAnObjectRoot) {
+            if (injectionPoint === undefined) {
+              if (stack.length === 1) {
+                waitingForTheEnd = true;
+              }
+            } else if (
+              injectionPoint === stackPath ||
+              (!injectionPointIsString && stackPath?.match(injectionPoint))
+            ) {
               waitingForTheEnd = true;
             }
-          } else if (
-            injectionPoint === stackPath ||
-            (!injectionPointIsString && stackPath?.match(injectionPoint))
-          ) {
-            waitingForTheEnd = true;
           }
         }
-      }
 
-      this.push(chunk);
-      callback(null);
+        this.push(chunk);
+        callback(null);
+      } catch (error) {
+        safeCallback(isNativeError(error) ? error : new Error(String(error)));
+      }
     }
   });
 
