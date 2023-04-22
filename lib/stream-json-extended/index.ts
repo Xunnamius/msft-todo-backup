@@ -1,6 +1,7 @@
 export * from 'multiverse/stream-json-extended/filter/inject-entry';
 export * from 'multiverse/stream-json-extended/filter/select-one';
 export * from 'multiverse/stream-json-extended/filter/object-sieve';
+export * from 'multiverse/stream-json-extended/filter/omit-entry';
 export * from 'multiverse/stream-json-extended/mixin/depth-tracking';
 export * from 'multiverse/stream-json-extended/mixin/stack-tracking';
 export * from 'multiverse/stream-json-extended/sink/big-string-parser';

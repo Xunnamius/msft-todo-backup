@@ -78,7 +78,7 @@ export function objectSieve({
   const releaseBuffer = function (this: Transform) {
     // ! Is this memory-safe? Probably, because we're moving data from
     // ! one cache (tokenBuffer) to another (internal stream buffer)
-    for (let index = 0; index < tokenBuffer.length; ++index) {
+    for (let index = 0, length = tokenBuffer.length; index < length; ++index) {
       this.push(tokenBuffer.shift());
     }
   };

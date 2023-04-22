@@ -2,7 +2,7 @@ import { type Readable, Transform, type TransformOptions } from 'node:stream';
 import { isNativeError } from 'node:util/types';
 
 import { chain } from 'stream-chain';
-import { ignore } from 'stream-json/filters/Ignore';
+import { omitEntry } from 'multiverse/stream-json-extended';
 
 import { escapeRegExp } from 'multiverse/stream-json-extended/util/escape-regexp';
 import { type JsonToken, useStackKeyTracking } from 'multiverse/stream-json-extended';
@@ -17,7 +17,9 @@ import { makeSafeCallback } from 'multiverse/stream-json-extended/util/make-safe
  * `pick` or `selectOne` filters.
  */
 export function injectEntry({
-  entry: { injectionPoint, key, valueTokenStream, autoIgnoreInjectionKey = true },
+  entry: { injectionPoint, key, valueTokenStream, autoOmitInjectionKey = true },
+  streamKeys = true,
+  packKeys = true,
   pathSeparator = '.',
   ...transformOptions
 }: TransformOptions & {
@@ -26,15 +28,17 @@ export function injectEntry({
    */
   entry: {
     /**
-     * The object into which this new entry should be injected.
+     * The point in the object into which this new entry should be injected.
+     * `injectionPoint` should be `undefined` (or not provided) if the entry
+     * should be injected at the root of the object.
      *
-     * If this is a regular expression, you may need to disable automatic
-     * ignoring of the injection key by setting `autoIgnoreInjectionKey` to
+     * If this is a regular expression, you _may_ need to disable automatic
+     * ignoring of the injection key by setting `autoOmitInjectionKey` to
      * `false`. This is usually unnecessary unless the regular expression is too
      * complex, uses flags, or contains more than one dollar sign ($) or the
      * dollar sign is not the final character of the expression.
      */
-    injectionPoint?: string | RegExp;
+    injectionPoint?: string | RegExp | undefined;
     /**
      * The key of the new entry to inject into the object.
      */
@@ -46,18 +50,33 @@ export function injectEntry({
      */
     valueTokenStream: Readable;
     /**
-     * If `true`, an {@link ignore} filter will be piped into the entry
-     * injection stream. The {@link ignore} filter will be configured to exclude
-     * the `key` from the target object by concatenating `injectionPoint + key`
-     * as a regular expression without flags.
+     * If `true`, an {@link omitEntry} filter will be piped into the entry
+     * injection stream. The {@link omitEntry} filter will be configured to
+     * exclude the `key` entry from the target object by concatenating
+     * `injectionPoint + pathSeparator + key` as a regular expression filter
+     * without flags.
      *
      * If this is not desired, or you want to do this manually, set
-     * `autoIgnoreInjectionKey` to `false`.
+     * `autoOmitInjectionKey` to `false`.
      *
      * @default true
      */
-    autoIgnoreInjectionKey?: boolean;
+    autoOmitInjectionKey?: boolean;
   };
+  /**
+   * If `true`, keys will be streamed as unpacked {@link JsonToken}s. If
+   * `packKeys` is `false`, `streamKeys` will be forced to `true` regardless of
+   * the value provided by this option.
+   *
+   * @see https://github.com/uhop/stream-json/wiki/Parser#constructoroptions
+   */
+  streamKeys?: boolean;
+  /**
+   * If `true`, keys will be streamed as packed {@link JsonToken}s.
+   *
+   * @see https://github.com/uhop/stream-json/wiki/Parser#constructoroptions
+   */
+  packKeys?: boolean;
   /**
    * A string that separates stack values when it is converted to a string.
    */
@@ -66,7 +85,7 @@ export function injectEntry({
   const injectionPointIsString = typeof injectionPoint === 'string';
   const { getStack, updateStack } = useStackKeyTracking();
 
-  let waitingForTheEnd = false;
+  let waitingForTheEndStack: ReturnType<typeof getStack> | undefined;
 
   const injectionStream = new Transform({
     ...transformOptions,
@@ -78,12 +97,30 @@ export function injectEntry({
         updateStack(chunk);
         const stack = getStack();
 
-        if (waitingForTheEnd) {
-          if (chunk.name === 'endObject') {
-            waitingForTheEnd = false;
+        if (waitingForTheEndStack !== undefined) {
+          if (
+            chunk.name === 'endObject' &&
+            waitingForTheEndStack.toString() === stack.toString()
+          ) {
+            waitingForTheEndStack = undefined;
+
+            if (streamKeys || !packKeys) {
+              const tokens: JsonToken[] = [
+                { name: 'startKey' },
+                { name: 'stringChunk', value: key },
+                { name: 'endKey' }
+              ];
+
+              tokens.forEach((token) => this.push(token));
+            }
+
+            if (packKeys) {
+              this.push({ name: 'keyValue', value: key } satisfies JsonToken);
+            }
+
             let calledCallback = false;
 
-            const onData = function (this: typeof injectionStream, chunk: unknown) {
+            const onData = (chunk: unknown) => {
               if (!this.push(chunk)) {
                 valueTokenStream.pause();
                 // ? Handle backpressure during unbounded chunk inflation
@@ -92,7 +129,7 @@ export function injectEntry({
               }
             };
 
-            const onEnd = function (error?: Error | null) {
+            const onEnd = (error?: Error | null) => {
               calledCallback = true;
               valueTokenStream.removeListener('data', onData);
               valueTokenStream.removeListener('end', onEnd);
@@ -114,20 +151,21 @@ export function injectEntry({
             return;
           }
         } else {
-          const stackPath = stack.slice(0, -1).join(pathSeparator);
+          const parentStack = stack.slice(0, -1);
+          const parentStackPath = parentStack.join(pathSeparator);
           const isEvaluatingAnObjectRoot =
             stack.length >= 1 && typeof stack[0] !== 'number';
 
           if (isEvaluatingAnObjectRoot) {
             if (injectionPoint === undefined) {
               if (stack.length === 1) {
-                waitingForTheEnd = true;
+                waitingForTheEndStack = parentStack;
               }
             } else if (
-              injectionPoint === stackPath ||
-              (!injectionPointIsString && stackPath?.match(injectionPoint))
+              injectionPoint === parentStackPath ||
+              (!injectionPointIsString && parentStackPath?.match(injectionPoint))
             ) {
-              waitingForTheEnd = true;
+              waitingForTheEndStack = parentStack;
             }
           }
         }
@@ -140,7 +178,7 @@ export function injectEntry({
     }
   });
 
-  if (autoIgnoreInjectionKey) {
+  if (autoOmitInjectionKey) {
     const escapedKey = escapeRegExp(key);
     let filterRegExp: RegExp;
 
@@ -159,7 +197,7 @@ export function injectEntry({
       }
     }
 
-    return chain([ignore({ filter: filterRegExp, pathSeparator }), injectionStream]);
+    return chain([omitEntry({ key: filterRegExp, pathSeparator }), injectionStream]);
   } else {
     return injectionStream;
   }

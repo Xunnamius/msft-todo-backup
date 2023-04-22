@@ -71,7 +71,7 @@ export function packEntry({
 }: FullAssemblerOptions &
   TransformOptions & {
     /**
-     * The key-related {@link JsonToken}(s) to search for. This parameter can be
+     * The entry key {@link JsonToken}(s) to search for. This parameter can be
      * either a singular string or regular expression or an array of strings /
      * regular expressions each representing a key to search for.
      *
@@ -117,7 +117,7 @@ export function packEntry({
   const releaseKeyTokenBuffer = function (this: Transform) {
     // ! Is this memory-safe? Probably, because we're moving data from
     // ! one cache (keyTokenBuffer) to another (internal stream buffer)
-    for (let index = 0; index < keyTokenBuffer.length; ++index) {
+    for (let index = 0, length = keyTokenBuffer.length; index < length; ++index) {
       this.push(keyTokenBuffer.shift());
     }
   };
@@ -130,7 +130,7 @@ export function packEntry({
   let matcher: string | RegExp;
   let isPackingKey = false;
   let isPackingValue = false;
-  let previouslyAssembledTokenName: JsonTokenName | undefined = undefined;
+  let previouslyMatchedTokenName: JsonTokenName | undefined = undefined;
 
   return new Transform({
     ...assemblerTransformOptions,
@@ -140,11 +140,11 @@ export function packEntry({
       const safeCallback = makeSafeCallback(callback);
 
       const shouldSkipAssembly =
-        (previouslyAssembledTokenName === 'endKey' && chunk.name === 'keyValue') ||
-        (previouslyAssembledTokenName === 'endString' && chunk.name === 'stringValue') ||
-        (previouslyAssembledTokenName === 'endNumber' && chunk.name === 'numberValue');
+        (previouslyMatchedTokenName === 'endKey' && chunk.name === 'keyValue') ||
+        (previouslyMatchedTokenName === 'endString' && chunk.name === 'stringValue') ||
+        (previouslyMatchedTokenName === 'endNumber' && chunk.name === 'numberValue');
 
-      previouslyAssembledTokenName = undefined;
+      previouslyMatchedTokenName = undefined;
 
       assert(isPackingKey !== isPackingValue || isPackingKey === false);
 
@@ -175,7 +175,7 @@ export function packEntry({
                 owner: ownerSymbol
               } satisfies JsonPackedEntryToken);
 
-              previouslyAssembledTokenName = chunk.name;
+              previouslyMatchedTokenName = chunk.name;
             }
 
             if (assembler.done || discardComponentTokens) {
@@ -197,11 +197,12 @@ export function packEntry({
               });
 
               isPackingKey = false;
-              previouslyAssembledTokenName = chunk.name;
 
               if (potentialMatcher) {
                 matcher = potentialMatcher;
                 isPackingValue = true;
+
+                previouslyMatchedTokenName = chunk.name;
 
                 if (discardComponentTokens) {
                   // ? If a match is found, discard its constituent tokens.
