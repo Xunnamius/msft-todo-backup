@@ -18,8 +18,8 @@ import type { JsonValue } from 'type-fest';
 
 /**
  * A predicate function representing an object entry (key-value) filter
- * condition used to determine if the entire object will be allowed through the
- * sieve or if it will potentially get discarded.
+ * condition used to determine if the object the entry belongs to will be
+ * allowed through the sieve or if it will potentially get discarded.
  *
  * Return `true` to ensure the object will pass through the sieve.
  */
@@ -93,8 +93,8 @@ export function objectSieve({
     new Transform({
       ...transformOptions,
       objectMode: true,
-      transform(chunk: JsonToken | JsonPackedEntryToken, _encoding, callback) {
-        const safeCallback = makeSafeCallback(callback);
+      transform(chunk: JsonToken | JsonPackedEntryToken, _encoding, callback_) {
+        const safeCallback = makeSafeCallback(callback_);
 
         try {
           const isOwnPackedEntry =
@@ -117,7 +117,7 @@ export function objectSieve({
               this.push(chunk);
             }
 
-            return callback(null);
+            return safeCallback(null);
           }
 
           if (!isDiscarding) {
@@ -157,7 +157,7 @@ export function objectSieve({
             }
           }
 
-          callback(null);
+          safeCallback(null);
         } catch (error) {
           safeCallback(isNativeError(error) ? error : new Error(String(error)));
         }

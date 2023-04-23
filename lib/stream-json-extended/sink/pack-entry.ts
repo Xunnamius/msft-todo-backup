@@ -4,10 +4,11 @@ import { Transform, type TransformOptions } from 'node:stream';
 
 import {
   FullAssembler,
+  useStackKeyTracking,
   type JsonToken,
   type JsonTokenName,
   type FullAssemblerOptions,
-  useStackKeyTracking
+  type JsonTokenValue
 } from 'multiverse/stream-json-extended';
 
 import { makeSafeCallback } from 'multiverse/stream-json-extended/util/make-safe-callback';
@@ -51,10 +52,10 @@ export type JsonPackedEntryToken = {
 };
 
 /**
- * Filters through a {@link JsonToken} stream looking for an object key matching
- * `key`. Once a matching key token(s) is encountered, the tokens representing
- * its value will be packed in their entirety and emitted as a single
- * {@link JsonPackedEntryToken}.
+ * Filters through a {@link JsonToken} stream looking for an object entry key
+ * matching `key`. Once a matching key token(s) is encountered, the tokens
+ * representing its value will be packed in their entirety and emitted as a
+ * single {@link JsonPackedEntryToken}.
  *
  * Depending on the value of `discardComponentTokens`, said key and value tokens
  * may be discarded in lieu of the {@link JsonPackedEntryToken}.
@@ -135,9 +136,9 @@ export function packEntry({
   return new Transform({
     ...assemblerTransformOptions,
     objectMode: true,
-    transform(chunk: JsonToken, _encoding, callback) {
+    transform(chunk: JsonToken, _encoding, callback_) {
       updateStack(chunk);
-      const safeCallback = makeSafeCallback(callback);
+      const safeCallback = makeSafeCallback(callback_);
 
       const shouldSkipAssembly =
         (previouslyMatchedTokenName === 'endKey' && chunk.name === 'keyValue') ||
@@ -152,8 +153,7 @@ export function packEntry({
         // ? Account for values that are both streamed and packed
         if (!shouldSkipAssembly) {
           if (isPackingValue) {
-            // ? TypeScript isn't yet smart enough to accept this.
-            assembler[chunk.name]?.(chunk.value!);
+            typeSafeConsume(assembler, chunk);
 
             if (assembler.done) {
               isPackingValue = false;
@@ -184,8 +184,7 @@ export function packEntry({
             }
           } else if (keyTokenNames.includes(chunk.name) || isPackingKey) {
             isPackingKey = true;
-            // ? TypeScript isn't yet smart enough to accept this.
-            assembler[chunk.name]?.(chunk.value!);
+            typeSafeConsume(assembler, chunk);
 
             if (assembler.done) {
               const stackPath = getStackPath();
@@ -240,5 +239,22 @@ export function packEntry({
 
   function getStackPath() {
     return getStack().join(pathSeparator);
+  }
+
+  function typeSafeConsume(fullAssembler: FullAssembler, { name, value }: JsonToken) {
+    switch (name) {
+      case 'keyValue':
+      case 'numberChunk':
+      case 'stringChunk':
+      case 'numberValue':
+      case 'stringValue': {
+        fullAssembler[name](value);
+        break;
+      }
+
+      default: {
+        fullAssembler[name]();
+      }
+    }
   }
 }

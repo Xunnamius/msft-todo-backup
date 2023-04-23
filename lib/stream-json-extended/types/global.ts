@@ -29,16 +29,20 @@ export type JsonTokenName =
   | JsonStreamedKeyTokenName;
 
 export type JsonTokenWithValueName =
-  | Extract<JsonTokenName, 'keyValue'>
-  | Extract<JsonTokenName, 'stringValue'>
-  | Extract<JsonTokenName, 'numberValue'>
+  | JsonPackedPrimitiveTokenName
   | Extract<JsonTokenName, 'stringChunk'>
   | Extract<JsonTokenName, 'numberChunk'>;
 
 export type JsonTokenWithoutValueName = Exclude<JsonTokenName, JsonTokenWithValueName>;
 
-export type JsonTokenValue = string;
+export type JsonTokenValue = string | true | false | null;
 
 export type JsonToken =
-  | { name: JsonTokenWithValueName; value: JsonTokenValue }
+  | {
+      name: Exclude<JsonTokenWithValueName, 'nullValue' | 'trueValue' | 'falseValue'>;
+      value: string;
+    }
+  | { name: Extract<JsonTokenWithValueName, 'nullValue'>; value: null }
+  | { name: Extract<JsonTokenWithValueName, 'trueValue'>; value: true }
+  | { name: Extract<JsonTokenWithValueName, 'falseValue'>; value: false }
   | { name: JsonTokenWithoutValueName; value?: undefined };

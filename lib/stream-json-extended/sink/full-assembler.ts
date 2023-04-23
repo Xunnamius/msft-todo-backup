@@ -1,6 +1,6 @@
 import Assembler, { type AssemblerOptions } from 'stream-json/Assembler';
 
-import type { JsonTokenName } from 'multiverse/stream-json-extended';
+import type { JsonToken, JsonTokenName } from 'multiverse/stream-json-extended';
 import type { AnyFunction } from '@xunnamius/types';
 
 /**
@@ -111,11 +111,17 @@ export class FullAssembler extends Assembler {
     //@ts-expect-error: @types package is missing some superclass methods
     this.falseValue = withPreviousTokenTracking.call(this, super.falseValue);
   }
+
+  // @ts-expect-error: @types package is suboptimal, let's fix it
+  consume(chunk: JsonToken) {
+    // @ts-expect-error: @types package is suboptimal, let's fix it
+    return super.consume(chunk);
+  }
 }
 
 function beginAssemblingToken(this: FullAssembler) {
   this.wasDone = this.done;
-  // ? This is required because the @types package is suboptimal
+  // ? This is required because the @types package is broken.
   (this.done as boolean) = false;
 }
 
@@ -127,7 +133,7 @@ function finalizeAssembledToken(
   this: FullAssembler,
   method: JsonStreamedAssembledTokenName
 ) {
-  // ? This is required because the @types package is suboptimal.
+  // ? This is required because the @types package is broken.
   // ? Also, this is required to be done BEFORE calling the appropriate method.
   (this.done as boolean) = this.wasDone;
 
