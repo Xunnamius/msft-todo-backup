@@ -4,6 +4,7 @@ import { pick } from 'stream-json/filters/Pick';
 import { type JsonToken, useDepthTracking } from 'multiverse/stream-json-extended';
 import { escapeRegExp } from 'multiverse/stream-json-extended/util/escape-regexp';
 
+import type { TransformOptions } from 'node:stream';
 import type { FilterOptions } from 'stream-json/filters/FilterBase';
 
 /**
@@ -18,23 +19,27 @@ import type { FilterOptions } from 'stream-json/filters/FilterBase';
 export function selectOne({
   key,
   escapeKey = true,
-  ...filterOptions
-}: Omit<FilterOptions, 'filter' | 'once'> & { key: string; escapeKey?: true }) {
+  ...transformAndFilterOptions
+}: TransformOptions &
+  Omit<FilterOptions, 'filter' | 'once'> & { key: string; escapeKey?: true }) {
   const { getDepth, updateDepth } = useDepthTracking();
 
-  return chain([
-    pick({
-      ...filterOptions,
-      filter: new RegExp(`^(\\d+\\.)?${escapeKey ? escapeRegExp(key) : key}$`),
-      once: true
-    }),
-    (chunk: JsonToken) => {
-      updateDepth(chunk);
-      const depth = getDepth();
-      return (depth === 1 && chunk.name === 'startArray') ||
-        (depth === 0 && chunk.name === 'endArray')
-        ? null
-        : chunk;
-    }
-  ]);
+  return chain(
+    [
+      pick({
+        ...transformAndFilterOptions,
+        filter: new RegExp(`^(\\d+\\.)?${escapeKey ? escapeRegExp(key) : key}$`),
+        once: true
+      }),
+      (chunk: JsonToken) => {
+        updateDepth(chunk);
+        const depth = getDepth();
+        return (depth === 1 && chunk.name === 'startArray') ||
+          (depth === 0 && chunk.name === 'endArray')
+          ? null
+          : chunk;
+      }
+    ],
+    { objectMode: true, ...transformAndFilterOptions }
+  );
 }

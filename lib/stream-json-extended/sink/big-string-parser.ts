@@ -11,11 +11,12 @@ import { parser } from 'stream-json';
  *
  * See https://github.com/uhop/stream-json/wiki/Parser for more details.
  */
-export function bigStringParser() {
+export function bigStringParser(parserOptions?: Parameters<typeof parser>[0]) {
   return parser({
     streamValues: false,
     streamStrings: true,
     packValues: true,
-    packStrings: false
+    packStrings: false,
+    ...parserOptions
   });
 }

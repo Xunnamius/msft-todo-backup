@@ -88,82 +88,86 @@ export function objectSieve({
     tokenBuffer.splice(0, tokenBuffer.length);
   };
 
-  const pipeline = chain([
-    packEntry({ key: filter.map(([key]) => key), ownerSymbol, pathSeparator }),
-    new Transform({
-      ...transformOptions,
-      objectMode: true,
-      transform(chunk: JsonToken | JsonPackedEntryToken, _encoding, callback_) {
-        const safeCallback = makeSafeCallback(callback_);
+  const pipeline = chain(
+    [
+      packEntry({ key: filter.map(([key]) => key), ownerSymbol, pathSeparator }),
+      new Transform({
+        ...transformOptions,
+        objectMode: true,
+        transform(chunk: JsonToken | JsonPackedEntryToken, _encoding, callback_) {
+          const safeCallback = makeSafeCallback(callback_);
 
-        try {
-          const isOwnPackedEntry =
-            chunk.name === packedEntrySymbol && chunk.owner === ownerSymbol;
+          try {
+            const isOwnPackedEntry =
+              chunk.name === packedEntrySymbol && chunk.owner === ownerSymbol;
 
-          updateDepth(chunk as JsonToken);
+            updateDepth(chunk as JsonToken);
 
-          if (getDepth() === 1 && chunk.name === 'startObject') {
-            isDiscarding = false;
-            isReleasing = false;
-          } else if (getDepth() === 0) {
-            isDiscarding = false;
-            isReleasing = true;
-          }
-
-          if (isOpen || isReleasing) {
-            releaseBuffer.call(this);
-
-            if (!isOwnPackedEntry) {
-              this.push(chunk);
+            if (getDepth() === 1 && chunk.name === 'startObject') {
+              isDiscarding = false;
+              isReleasing = false;
+            } else if (getDepth() === 0) {
+              isDiscarding = false;
+              isReleasing = true;
             }
 
-            return safeCallback(null);
-          }
+            if (isOpen || isReleasing) {
+              releaseBuffer.call(this);
 
-          if (!isDiscarding) {
-            if (isOwnPackedEntry) {
-              const entryFilter = filter.find(([key]) => key === chunk.matcher);
-
-              if (entryFilter) {
-                const [, entryValueFilter] = entryFilter;
-
-                const passesValueFilterFn =
-                  typeof entryValueFilter === 'function' && entryValueFilter(chunk.value);
-
-                const isADeepSubset =
-                  chunk.value !== null &&
-                  entryValueFilter !== null &&
-                  typeof chunk.value === 'object' &&
-                  typeof entryValueFilter === 'object' &&
-                  isDeepSubset(chunk.value, entryValueFilter);
-
-                if (
-                  chunk.value === entryValueFilter ||
-                  passesValueFilterFn ||
-                  isADeepSubset
-                ) {
-                  isReleasing = true;
-                  releaseBuffer.call(this);
-                }
-
-                // ? This object does not satisfy any filters
-                else if (filter.length <= 1) {
-                  isDiscarding = true;
-                  discardBuffer();
-                }
+              if (!isOwnPackedEntry) {
+                this.push(chunk);
               }
-            } else {
-              tokenBuffer.push(chunk);
-            }
-          }
 
-          safeCallback(null);
-        } catch (error) {
-          safeCallback(isNativeError(error) ? error : new Error(String(error)));
+              return safeCallback(null);
+            }
+
+            if (!isDiscarding) {
+              if (isOwnPackedEntry) {
+                const entryFilter = filter.find(([key]) => key === chunk.matcher);
+
+                if (entryFilter) {
+                  const [, entryValueFilter] = entryFilter;
+
+                  const passesValueFilterFn =
+                    typeof entryValueFilter === 'function' &&
+                    entryValueFilter(chunk.value);
+
+                  const isADeepSubset =
+                    chunk.value !== null &&
+                    entryValueFilter !== null &&
+                    typeof chunk.value === 'object' &&
+                    typeof entryValueFilter === 'object' &&
+                    isDeepSubset(chunk.value, entryValueFilter);
+
+                  if (
+                    chunk.value === entryValueFilter ||
+                    passesValueFilterFn ||
+                    isADeepSubset
+                  ) {
+                    isReleasing = true;
+                    releaseBuffer.call(this);
+                  }
+
+                  // ? This object does not satisfy any filters
+                  else if (filter.length <= 1) {
+                    isDiscarding = true;
+                    discardBuffer();
+                  }
+                }
+              } else {
+                tokenBuffer.push(chunk);
+              }
+            }
+
+            safeCallback(null);
+          } catch (error) {
+            safeCallback(isNativeError(error) ? error : new Error(String(error)));
+          }
         }
-      }
-    })
-  ]) as ReturnType<typeof chain> & {
+      })
+    ],
+    { objectMode: true, ...transformOptions }
+  ) as ReturnType<typeof chain> & {
     /**
      * Disables `objectSieve`'s default behavior, allowing the free flow of
      * chunks through the sieve. Any chunks that were caught by the sieve will

@@ -61,16 +61,17 @@ export function injectEntry({
      * `valueTokenStreamFactory` will first be called when `injectEntry`
      * receives its first chunk, returning a {@link Readable}. Said
      * {@link Readable} will receive all chunks that `injectEntry` receives,
-     * allowing the stream to condition its output on the current context.
+     * allowing the stream to condition its eventual output on the current
+     * context.
      *
-     * However, **it is imperative that the Readable not push data unless it is
-     * in [flowing
+     * However, **it is imperative that the Readable not `push()` data unless it
+     * is in [flowing
      * mode](https://nodejs.org/api/stream.html#two-reading-modes)**, since the
      * stream will not (and must not) immediately enter flowing mode and may
      * **never** enter flowing mode if `injectEntry` never injects any entries.
      * **If the Readable's buffer fills up and starts exerting
      * [backpressure](https://nodejs.org/en/docs/guides/backpressuring-in-streams#rules-to-abide-by-when-implementing-custom-streams)
-     * without being in flowing mode, the entire pipeline will deadlock.**
+     * without being in flowing mode, the stream will be destroyed.**
      *
      * After the {@link Readable} returned by `valueTokenStreamFactory` is
      * discarded, `valueTokenStreamFactory` will be called again and the new
@@ -124,20 +125,18 @@ export function injectEntry({
     objectMode: true,
     async transform(chunk: JsonToken, _encoding, callback_) {
       const safeCallback = makeSafeCallback(callback_);
-      let waitForValueTokenStreamToDrain = false;
 
       try {
         // * Similar to putting the lines after this in process.nextTick(...)
         valueTokenStream ??= await valueTokenStreamFactory();
 
-        if ('writable' in valueTokenStream) {
-          const duplexValueTokenStream = valueTokenStream as Duplex;
-
-          // ? Handle backpressure
-          if (!duplexValueTokenStream.write(chunk)) {
-            waitForValueTokenStreamToDrain = true;
-            duplexValueTokenStream.once('drain', () => safeCallback(null));
-          }
+        if (
+          'writable' in valueTokenStream &&
+          !(valueTokenStream as Duplex).write(chunk)
+        ) {
+          return safeCallback(
+            new Error('backpressure deadlock: value token stream high water mark reached')
+          );
         }
 
         updateStack(chunk);
@@ -167,9 +166,11 @@ export function injectEntry({
             const onData = (chunk: unknown) => {
               if (!this.push(chunk)) {
                 valueTokenStream.pause();
-                // ? Handle backpressure during unbounded chunk inflation
+                // ? Handle backpressure during unbounded chunk inflation. Use
+                // ? setImmediate to give whatever caused the pause a chance to
+                // ? resolve itself (especially if I/O or network-bound).
                 // * https://stackoverflow.com/a/73474849/1367414
-                this.once('data', () => valueTokenStream.resume());
+                this.once('data', () => setImmediate(() => valueTokenStream.resume()));
               }
             };
 
@@ -206,7 +207,7 @@ export function injectEntry({
               onEnd(
                 valueTokenStream.readable === undefined
                   ? new Error('value token stream is not a Readable')
-                  : null
+                  : new Error('value token stream is not readable')
               );
             }
 
@@ -232,10 +233,7 @@ export function injectEntry({
         }
 
         this.push(chunk);
-
-        if (!waitForValueTokenStreamToDrain) {
-          safeCallback(null);
-        }
+        safeCallback(null);
       } catch (error) {
         safeCallback(isNativeError(error) ? error : new Error(String(error)));
       }
@@ -261,7 +259,10 @@ export function injectEntry({
       }
     }
 
-    return chain([omitEntry({ key: filterRegExp, pathSeparator }), injectionStream]);
+    return chain([omitEntry({ key: filterRegExp, pathSeparator }), injectionStream], {
+      objectMode: true,
+      ...transformOptions
+    });
   } else {
     return injectionStream;
   }

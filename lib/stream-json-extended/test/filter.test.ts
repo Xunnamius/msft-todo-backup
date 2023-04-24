@@ -1,5 +1,6 @@
 /* eslint-disable no-await-in-loop */
 import { PassThrough, Duplex, Writable, Readable } from 'node:stream';
+import assert from 'node:assert';
 
 import {
   type JsonToken,
@@ -12,6 +13,8 @@ import {
   feedTokenStream,
   tokenizeObject
 } from 'multiverse/stream-json-extended/test/setup';
+import { chain } from 'stream-chain';
+import { AnyFunction } from '@xunnamius/types';
 
 describe('|>inject-entry', () => {
   describe('::injectEntry', () => {
@@ -280,16 +283,142 @@ describe('|>inject-entry', () => {
       ).rejects.toThrow('bad');
     });
 
-    it.only('handles returned Readable that is not readable', async () => {
-      // TODO: test all non-readable scenarios including error and already-ended
+    it('handles returned Readable that is not readable', async () => {
       expect.hasAssertions();
+
+      const nonReadable = Readable.from([]).resume();
+      const targetObjects = [{ name: 'object-1' }, { name: 'object-2' }];
+      const tokenizedObjects = await tokenizeObject(targetObjects, {
+        excludeFirstAndLast: true
+      });
+
+      assert(nonReadable.readable === false);
+
+      await expect(
+        feedTokenStream(
+          tokenizedObjects,
+          injectEntry({
+            entry: {
+              key: 'children',
+              valueTokenStreamFactory: async () => nonReadable
+            }
+          })
+        )
+      ).rejects.toThrow('value token stream is not readable');
+    });
+
+    it('handles Readable that throws', async () => {
+      expect.hasAssertions();
+
+      const nonReadable = Readable.from([]).resume();
+      const targetObjects = [{ name: 'object-1' }, { name: 'object-2' }];
+      const tokenizedObjects = await tokenizeObject(targetObjects, {
+        excludeFirstAndLast: true
+      });
+
+      assert(nonReadable.readable === false);
+
+      await expect(
+        feedTokenStream(
+          tokenizedObjects,
+          injectEntry({
+            entry: {
+              key: 'children',
+              valueTokenStreamFactory: async () => {
+                return new Readable({
+                  objectMode: true,
+                  read() {
+                    this.destroy(new Error('bad'));
+                  }
+                });
+              }
+            }
+          })
+        )
+      ).rejects.toThrow('bad');
     });
 
     it('handles downstream backpressure', async () => {
+      expect.assertions(3);
+
+      let endJestTest: AnyFunction;
+      const waitForTestToEnd = new Promise((resolve) => {
+        endJestTest = resolve;
+      });
+
+      const readableStream = Readable.from(
+        await tokenizeObject([{}], { excludeFirstAndLast: true })
+      );
+
+      const injectorStream = injectEntry({
+        highWaterMark: 2,
+        entry: {
+          key: 'value',
+          valueTokenStreamFactory: async () => {
+            const injectionStream = Readable.from([
+              { name: 'startArray' },
+              { name: 'numberValue', value: '1' },
+              { name: 'numberValue', value: '2' },
+              { name: 'numberValue', value: '3' },
+              { name: 'endArray' }
+            ] satisfies JsonToken[]);
+
+            if (exertBackpressure) {
+              injectionStream.once('pause', () => {
+                if (writableStreamCallback !== undefined) {
+                  // ? Counting expectations with expect.assertions(3)
+                  expect(true).toBeTrue();
+
+                  const callback = writableStreamCallback;
+                  writableStreamCallback = undefined;
+                  exertBackpressure = false;
+
+                  injectionStream.once('resume', () => {
+                    // ? Counting expectations with expect.assertions(3)
+                    expect(true).toBeTrue();
+                  });
+
+                  callback(null);
+                }
+              });
+            }
+
+            return injectionStream;
+          }
+        }
+      });
+
+      let writableStreamCallback: AnyFunction | undefined = undefined;
+      let exertBackpressure = true;
+
+      const writableStream = new Writable({
+        objectMode: true,
+        highWaterMark: 1,
+        write(chunk, _encoding, callback) {
+          void chunk;
+          if (exertBackpressure) {
+            // ! callback() is not called !
+            writableStreamCallback = callback;
+          } else {
+            callback(null);
+          }
+        }
+      });
+
+      chain([readableStream, injectorStream, writableStream]).on('end', () => {
+        // ? Counting expectations with expect.assertions(3)
+        expect(true).toBeTrue();
+        endJestTest();
+      });
+
+      await waitForTestToEnd;
+    });
+
+    it('errors on backpressure from value token stream', async () => {
       expect.hasAssertions();
     });
 
-    it('handles backpressure from value token stream', async () => {
+    it('handles backpressure from value token stream only on endObject JsonTokens', async () => {
       expect.hasAssertions();
     });
 

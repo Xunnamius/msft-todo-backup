@@ -44,11 +44,6 @@ export function omitEntry({
           : chunk;
       }
     ],
-    {
-      objectMode: true,
-      readableObjectMode: true,
-      writableObjectMode: true,
-      ...transformOptions
-    }
+    { objectMode: true, ...transformOptions }
   );
 }
