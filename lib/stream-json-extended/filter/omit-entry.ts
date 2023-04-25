@@ -44,6 +44,6 @@ export function omitEntry({
           : chunk;
       }
     ],
-    { objectMode: true, ...transformOptions }
+    { ...transformOptions, objectMode: true }
   );
 }

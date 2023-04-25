@@ -166,7 +166,7 @@ export function objectSieve({
         }
       })
     ],
-    { objectMode: true, ...transformOptions }
+    { ...transformOptions, objectMode: true }
   ) as ReturnType<typeof chain> & {
     /**
      * Disables `objectSieve`'s default behavior, allowing the free flow of

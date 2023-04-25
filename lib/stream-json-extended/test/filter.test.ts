@@ -1,20 +1,26 @@
 /* eslint-disable no-await-in-loop */
-import { PassThrough, Duplex, Writable, Readable } from 'node:stream';
+import { Transform, Duplex, Writable, Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import assert from 'node:assert';
 
+import { chain } from 'stream-chain';
+
 import {
-  type JsonToken,
   injectEntry,
   objectSieve,
-  selectOne
+  selectOne,
+  packEntry,
+  type JsonToken,
+  type JsonPackedEntryToken,
+  packedEntrySymbol
 } from 'multiverse/stream-json-extended';
 
 import {
   feedTokenStream,
   tokenizeObject
 } from 'multiverse/stream-json-extended/test/setup';
-import { chain } from 'stream-chain';
-import { AnyFunction } from '@xunnamius/types';
+
+import type { AnyFunction } from '@xunnamius/types';
 
 describe('|>inject-entry', () => {
   describe('::injectEntry', () => {
@@ -341,11 +347,6 @@ describe('|>inject-entry', () => {
     it('handles downstream backpressure', async () => {
       expect.assertions(3);
 
-      let endJestTest: AnyFunction;
-      const waitForTestToEnd = new Promise((resolve) => {
-        endJestTest = resolve;
-      });
-
       const readableStream = Readable.from(
         await tokenizeObject([{}], { excludeFirstAndLast: true })
       );
@@ -394,8 +395,7 @@ describe('|>inject-entry', () => {
       const writableStream = new Writable({
         objectMode: true,
         highWaterMark: 1,
-        write(chunk, _encoding, callback) {
-          void chunk;
+        write(_chunk, _encoding, callback) {
           if (exertBackpressure) {
             // ! callback() is not called !
             writableStreamCallback = callback;
@@ -405,32 +405,263 @@ describe('|>inject-entry', () => {
         }
       });
 
-      chain([readableStream, injectorStream, writableStream]).on('end', () => {
-        // ? Counting expectations with expect.assertions(3)
-        expect(true).toBeTrue();
-        endJestTest();
+      const pipeline = chain([readableStream, injectorStream, writableStream]).on(
+        'end',
+        () => {
+          // ? Counting expectations with expect.assertions(3)
+          expect(true).toBeTrue();
+        }
+      );
+
+      await finished(pipeline);
+    });
+
+    it('errors on backpressure from value token stream and destroys both streams', async () => {
+      expect.hasAssertions();
+
+      const duplexStream = new Duplex({
+        highWaterMark: 1,
+        objectMode: true,
+        write(_chunk, _encoding, callback) {
+          void callback;
+          // ! callback() is not called !
+        },
+        read() {
+          this.push(null);
+        }
       });
 
-      await waitForTestToEnd;
-    });
+      const pipeline = chain([
+        Readable.from(await tokenizeObject([{}])),
+        injectEntry({
+          entry: {
+            key: 'value',
+            valueTokenStreamFactory: async () => duplexStream
+          }
+        }),
+        new Writable({
+          objectMode: true,
+          write(_chunk, _encoding, callback) {
+            callback(null);
+          }
+        })
+      ]);
 
-    it('errors on backpressure from value token stream', async () => {
-      expect.hasAssertions();
-    });
-
-    it('handles backpressure from value token stream only on endObject JsonTokens', async () => {
-      expect.hasAssertions();
+      await finished(pipeline).catch((error) => {
+        expect(duplexStream.destroyed).toBeTrue();
+        expect(error).toMatchObject({
+          message: 'backpressure deadlock: value token stream high water mark reached'
+        });
+      });
     });
 
     it('handles errors from value token stream', async () => {
       expect.hasAssertions();
+
+      const pipeline = chain([
+        Readable.from(await tokenizeObject({})),
+        injectEntry({
+          entry: {
+            key: 'value',
+            valueTokenStreamFactory: () => {
+              return new Readable({
+                objectMode: true,
+                read() {
+                  this.destroy(new Error('bad'));
+                }
+              });
+            }
+          }
+        }),
+        new Writable({
+          objectMode: true,
+          write(_chunk, _encoding, callback) {
+            callback(null);
+          }
+        })
+      ]);
+
+      await finished(pipeline).catch((error) => {
+        expect(error).toMatchObject({
+          message: 'bad'
+        });
+      });
     });
 
-    it('excludes the injection key if it exists unless autoIgnoreInjectionKey is false', async () => {
+    it('excludes the injection key if autoOmitInjectionKey is true', async () => {
       expect.hasAssertions();
     });
 
-    it('respects pathSeparator option', async () => {
+    it('does not exclude the injection key if autoOmitInjectionKey is false', async () => {
+      expect.hasAssertions();
+    });
+
+    it('tokens excluded by autoOmitInjectionKey are still piped into value token Duplex streams with async callbacks', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object5' },
+        { noname: true }
+      ] as const;
+
+      const ownerSymbol = Symbol('owner-symbol');
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: () => {
+                const tokenBuffer: JsonToken[] = [];
+
+                return chain(
+                  [
+                    packEntry({ key: 'name', ownerSymbol }),
+                    new Duplex({
+                      objectMode: true,
+                      async write(
+                        chunk: JsonToken | JsonPackedEntryToken,
+                        _encoding,
+                        callback
+                      ) {
+                        if (
+                          chunk.name === packedEntrySymbol &&
+                          chunk.owner === ownerSymbol
+                        ) {
+                          const updatedName =
+                            'renamed-object-' +
+                            ((chunk.value as string).split('-').at(1) || '???');
+
+                          tokenBuffer.push(...(await tokenizeObject(updatedName)));
+                        }
+
+                        callback(null);
+                      },
+                      async read() {
+                        this.once('finish', () => {
+                          if (tokenBuffer.length) {
+                            tokenBuffer.forEach((token) => this.push(token));
+                          } else {
+                            this.push({
+                              name: 'nullValue',
+                              value: null
+                            } satisfies JsonToken);
+                          }
+
+                          this.push(null);
+                        });
+                      }
+                    })
+                  ],
+                  { objectMode: true }
+                );
+              }
+            }
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj) => {
+            const returnValue =
+              'name' in obj
+                ? { name: `renamed-object-${obj.name.split('-').at(1) ?? '???'}` }
+                : { noname: true, name: null };
+
+            return returnValue as (typeof targetObjects)[number];
+          }),
+          { excludeFirstAndLast: true }
+        )
+      );
+    });
+
+    it('tokens excluded by autoOmitInjectionKey are still piped into value token Transform streams with async callbacks', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object5' },
+        { noname: true }
+      ] as const;
+
+      const ownerSymbol = Symbol('owner-symbol');
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: () => {
+                const tokenBuffer: JsonToken[] = [];
+
+                return chain(
+                  [
+                    packEntry({ key: 'name', ownerSymbol }),
+                    new Transform({
+                      objectMode: true,
+                      async transform(
+                        chunk: JsonToken | JsonPackedEntryToken,
+                        _encoding,
+                        callback
+                      ) {
+                        if (
+                          chunk.name === packedEntrySymbol &&
+                          chunk.owner === ownerSymbol
+                        ) {
+                          const updatedName =
+                            'renamed-object-' +
+                            ((chunk.value as string).split('-').at(1) || '???');
+
+                          tokenBuffer.push(...(await tokenizeObject(updatedName)));
+                        }
+
+                        callback(null);
+                      },
+                      async flush() {
+                        if (tokenBuffer.length) {
+                          tokenBuffer.forEach((token) => this.push(token));
+                        } else {
+                          this.push({
+                            name: 'nullValue',
+                            value: null
+                          } satisfies JsonToken);
+                        }
+
+                        this.push(null);
+                      }
+                    })
+                  ],
+                  { objectMode: true }
+                );
+              }
+            }
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj) => {
+            const returnValue =
+              'name' in obj
+                ? { name: `renamed-object-${obj.name.split('-').at(1) ?? '???'}` }
+                : { noname: true, name: null };
+
+            return returnValue as (typeof targetObjects)[number];
+          }),
+          { excludeFirstAndLast: true }
+        )
+      );
+    });
+
+    it('respects pathSeparator option and passes it to internal omitEntry stream', async () => {
+      // TODO: omitEntry still works when using different separator too
       expect.hasAssertions();
     });
 

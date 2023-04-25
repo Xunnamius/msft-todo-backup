@@ -7,8 +7,7 @@ import {
   useStackKeyTracking,
   type JsonToken,
   type JsonTokenName,
-  type FullAssemblerOptions,
-  type JsonTokenValue
+  type FullAssemblerOptions
 } from 'multiverse/stream-json-extended';
 
 import { makeSafeCallback } from 'multiverse/stream-json-extended/util/make-safe-callback';

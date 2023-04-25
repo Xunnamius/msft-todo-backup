@@ -40,6 +40,6 @@ export function selectOne({
           : chunk;
       }
     ],
-    { objectMode: true, ...transformAndFilterOptions }
+    { ...transformAndFilterOptions, objectMode: true }
   );
 }
