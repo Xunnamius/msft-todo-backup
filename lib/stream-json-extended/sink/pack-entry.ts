@@ -79,8 +79,8 @@ export function packEntry({
      * flushed downstream.
      *
      * `key` will be compared against the entire key path, with each key
-     * separated by `pathSeparator`. For example, `b: 1` in `[{a: {b: 1}}]`
-     * would be matched by a `key` of `0.a.b` or `/^0\.a\.b$/`.
+     * separated by `pathSeparator`. For example, the entry `b: 1` in `[{a: {b:
+     * 1}}]` would be matched by a `key` of `0.a.b` or `/^0\.a\.b$/`.
      *
      * Note that `keys` are matched in FILO order, meaning each packed entry is
      * associated only with a first matching `key` filter even if multiple

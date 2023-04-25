@@ -490,10 +490,62 @@ describe('|>inject-entry', () => {
 
     it('excludes the injection key if autoOmitInjectionKey is true', async () => {
       expect.hasAssertions();
+
+      const targetObjects = [{ name: 'object-1' }];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            autoOmitInjectionKey: true,
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: async () => Readable.from([])
+            }
+          })
+        )
+      ).resolves.toStrictEqual([
+        { name: 'startObject' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'name' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'name' },
+        { name: 'endObject' }
+      ]);
     });
 
     it('does not exclude the injection key if autoOmitInjectionKey is false', async () => {
       expect.hasAssertions();
+
+      const targetObjects = [{ name: 'object-1' }];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            autoOmitInjectionKey: false,
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: async () => Readable.from([])
+            }
+          })
+        )
+      ).resolves.toStrictEqual([
+        { name: 'startObject' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'name' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'name' },
+        { name: 'startString' },
+        { name: 'stringChunk', value: 'object-1' },
+        { name: 'endString' },
+        { name: 'stringValue', value: 'object-1' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'name' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'name' },
+        { name: 'endObject' }
+      ]);
     });
 
     it('tokens excluded by autoOmitInjectionKey are still piped into value token Duplex streams with async callbacks', async () => {
@@ -661,16 +713,239 @@ describe('|>inject-entry', () => {
     });
 
     it('respects pathSeparator option and passes it to internal omitEntry stream', async () => {
-      // TODO: omitEntry still works when using different separator too
       expect.hasAssertions();
+
+      const targetObjects = [
+        { subObject: { subArray: [{ name: 'object-a' }, { name: 'object-b' }] } },
+        { subObject: { subArray: [{ name: 'object-c' }, { name: 'object-d' }] } }
+      ];
+
+      const targetObjectsTokens = await tokenizeObject(targetObjects, {
+        streamValues: false
+      });
+
+      const injectedToken: JsonToken = { name: 'falseValue', value: false };
+
+      await Promise.all([
+        expect(
+          feedTokenStream(
+            targetObjectsTokens,
+            injectEntry({
+              autoOmitInjectionKey: true,
+              pathSeparator: '->',
+              streamKeys: false,
+              entry: {
+                injectionPoint: '1->subObject->subArray->0',
+                key: 'name',
+                valueTokenStreamFactory: () => Readable.from([injectedToken])
+              }
+            })
+          )
+        ).resolves.toStrictEqual(
+          targetObjectsTokens.map((token) =>
+            token.value === 'object-c' ? injectedToken : token
+          )
+        ),
+        expect(
+          feedTokenStream(
+            targetObjectsTokens,
+            injectEntry({
+              autoOmitInjectionKey: true,
+              pathSeparator: '->',
+              streamKeys: false,
+              entry: {
+                injectionPoint: /\d+->subObject->subArray->\d+/,
+                key: 'name',
+                valueTokenStreamFactory: () => Readable.from([injectedToken])
+              }
+            })
+          )
+        ).resolves.toStrictEqual(
+          targetObjectsTokens.map((token) =>
+            typeof token.value === 'string' && token.value.startsWith('object-')
+              ? injectedToken
+              : token
+          )
+        )
+      ]);
     });
 
-    it('respects streamKeys option', async () => {
+    it('passes autoOmitInjectionKeyFilter to internal omitEntry stream', async () => {
       expect.hasAssertions();
+
+      const targetObjects = [
+        { subObject: { subArray: [{ name: 'object-a' }, { name: 'object-b' }] } },
+        { subObject: { subArray: [{ name: 'object-c' }, { name: 'object-d' }] } }
+      ];
+
+      const targetObjectsTokens = await tokenizeObject(targetObjects, {
+        streamValues: false
+      });
+
+      const injectedToken: JsonToken = { name: 'falseValue', value: false };
+
+      await expect(
+        feedTokenStream(
+          targetObjectsTokens,
+          injectEntry({
+            autoOmitInjectionKey: true,
+            autoOmitInjectionKeyFilter: 'does->not->match->anything',
+            pathSeparator: '->',
+            streamKeys: false,
+            entry: {
+              injectionPoint: '1->subObject->subArray->0',
+              key: 'name',
+              valueTokenStreamFactory: () => Readable.from([injectedToken])
+            }
+          })
+        )
+      ).resolves.toStrictEqual(
+        targetObjectsTokens.flatMap((token) => {
+          return token.name === 'stringValue' && token.value === 'object-c'
+            ? ([
+                token,
+                { name: 'keyValue', value: 'name' },
+                injectedToken
+              ] satisfies JsonToken[])
+            : token;
+        })
+      );
     });
 
-    it('respects packKeys option', async () => {
+    it('streams new entry keys if streamKeys is true', async () => {
       expect.hasAssertions();
+
+      const targetObjects = [{ name: 'object-1' }];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            streamKeys: true,
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: async () =>
+                Readable.from([{ name: 'falseValue', value: false } satisfies JsonToken])
+            }
+          })
+        )
+      ).resolves.toStrictEqual([
+        { name: 'startObject' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'name' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'name' },
+        { name: 'falseValue', value: false },
+        { name: 'endObject' }
+      ]);
+    });
+
+    it('does not stream new entry keys if streamKeys is false', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [{ name: 'object-1' }];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            streamKeys: false,
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: async () =>
+                Readable.from([{ name: 'falseValue', value: false } satisfies JsonToken])
+            }
+          })
+        )
+      ).resolves.toStrictEqual([
+        { name: 'startObject' },
+        { name: 'keyValue', value: 'name' },
+        { name: 'falseValue', value: false },
+        { name: 'endObject' }
+      ]);
+    });
+
+    it('packs new entry keys if packKeys option is true', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [{ name: 'object-1' }];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            packKeys: true,
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: async () =>
+                Readable.from([{ name: 'falseValue', value: false } satisfies JsonToken])
+            }
+          })
+        )
+      ).resolves.toStrictEqual([
+        { name: 'startObject' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'name' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'name' },
+        { name: 'falseValue', value: false },
+        { name: 'endObject' }
+      ]);
+    });
+
+    it('does not pack new entry keys if packKeys is false', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [{ name: 'object-1' }];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            packKeys: false,
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: async () =>
+                Readable.from([{ name: 'falseValue', value: false } satisfies JsonToken])
+            }
+          })
+        )
+      ).resolves.toStrictEqual([
+        { name: 'startObject' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'name' },
+        { name: 'endKey' },
+        { name: 'falseValue', value: false },
+        { name: 'endObject' }
+      ]);
+    });
+
+    it('streams new entry keys but does not pack them if streamKeys and packKeys are both false', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [{ name: 'object-1' }];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            streamKeys: false,
+            packKeys: false,
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: async () =>
+                Readable.from([{ name: 'falseValue', value: false } satisfies JsonToken])
+            }
+          })
+        )
+      ).resolves.toStrictEqual([
+        { name: 'startObject' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'name' },
+        { name: 'endKey' },
+        { name: 'falseValue', value: false },
+        { name: 'endObject' }
+      ]);
     });
   });
 });
