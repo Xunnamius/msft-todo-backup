@@ -110,7 +110,9 @@ const rules = {
   // ? Lol, no
   'unicorn/explicit-length-check': 'off',
   // ? I don't think so
-  'unicorn/no-negated-condition': 'off'
+  'unicorn/no-negated-condition': 'off',
+  // ? This is not it, chief (Prettier supersedes)
+  'unicorn/number-literal-case': 'off'
 };
 
 module.exports = {
