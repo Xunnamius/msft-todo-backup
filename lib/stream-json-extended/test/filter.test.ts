@@ -8,11 +8,12 @@ import { chain } from 'stream-chain';
 import {
   injectEntry,
   objectSieve,
-  selectOne,
+  omitEntry,
+  selectEntry,
   packEntry,
+  packedEntrySymbol,
   type JsonToken,
-  type JsonPackedEntryToken,
-  packedEntrySymbol
+  type JsonPackedEntryToken
 } from 'multiverse/stream-json-extended';
 
 import {
@@ -952,22 +953,657 @@ describe('|>inject-entry', () => {
 
 describe('|>object-sieve', () => {
   describe('::objectSieve', () => {
-    it('todo', async () => {
+    const complexTargetObjects = [
+      {
+        something: 'else',
+        subObject: {
+          subArray: [
+            { name: 'thingy-1', id: 1 },
+            { name: 'object-5', id: 5 }
+          ]
+        }
+      },
+      {
+        subObject: {
+          something: 'else',
+          subArray: [
+            { something: 'else' },
+            { name: 'thingy-2', id: 2 },
+            { name: 'object-4', id: 4 }
+          ]
+        }
+      },
+      {
+        something: 'else',
+        subObject: {
+          something: 'else',
+          subArray: [
+            { name: 'thingy-3', id: 3 },
+            { something: 'else' },
+            { name: 'object-3', id: 3 }
+          ]
+        }
+      },
+      {
+        something: 'else',
+        subObject: {
+          something: 'else',
+          subArray: [
+            { name: 'thingy-4', id: 4 },
+            { name: 'object-2', id: 2 },
+            { something: 'else' }
+          ]
+        }
+      },
+      {
+        something: 'else',
+        subObject: {
+          something: 'else',
+          subArray: [
+            { something: 'else' },
+            { name: 'thingy-5', id: 5 },
+            { name: 'object-1', id: 1 }
+          ]
+        }
+      }
+    ] as const;
+
+    it('discards objects that do not satisfy filter value', async () => {
       expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object-5' }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [['name', 'object-3']]
+          })
+        )
+      ).resolves.toStrictEqual(await tokenizeObject({ name: 'object-3' }));
+    });
+
+    it('discards objects that do not satisfy RegExp filter key', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object-5' }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [[/^n/, 'object-3']]
+          })
+        )
+      ).resolves.toStrictEqual(await tokenizeObject({ name: 'object-3' }));
+    });
+
+    it('discards all objects when no keys match string filter key', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object-5' }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [['id', 1]]
+          })
+        )
+      ).resolves.toStrictEqual([]);
+    });
+
+    it('discards all objects when no keys match RegExp filter key', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object-5' }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [[/^.*$/, 1]]
+          })
+        )
+      ).resolves.toStrictEqual([]);
+    });
+
+    it('returns the correct result when filter contains duplicate keys', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object-5' }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [
+              ['name', 'object-3'],
+              ['name', 'object-4']
+            ]
+          })
+        )
+      ).resolves.toStrictEqual(await tokenizeObject({ name: 'object-3' }));
+    });
+
+    it('returns the correct result when filter contains overlapping keys', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object-5' }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [
+              [/^.*$/, 'object-3'],
+              ['name', 'object-4']
+            ]
+          })
+        )
+      ).resolves.toStrictEqual(await tokenizeObject({ name: 'object-3' }));
+    });
+
+    it('matches multiple possible values for the same key via SieveFunction', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1' },
+        { name: 'object-2' },
+        { name: 'object-3' },
+        { name: 'object-4' },
+        { name: 'object-5' }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [
+              [
+                'name',
+                (value) => {
+                  return value === 'object-3' || value === 'object-4';
+                }
+              ]
+            ]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([{ name: 'object-3' }, { name: 'object-4' }], {
+          excludeFirstAndLast: true
+        })
+      );
+    });
+
+    it('discards objects that do not satisfy any of multiple filter values', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1', id: 1 },
+        { name: 'object-2', id: 2 },
+        { name: 'object-3', id: 3 },
+        { name: 'object-4', id: 4 },
+        { name: 'object-5', id: 5 }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [
+              ['name', 'object-3'],
+              ['id', 1]
+            ]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          [
+            { name: 'object-1', id: 1 },
+            { name: 'object-3', id: 3 }
+          ],
+          { excludeFirstAndLast: true }
+        )
+      );
+    });
+
+    it('discards all objects when filter value types do not match', async () => {
+      expect.hasAssertions();
+
+      const targetObjects = [
+        { name: 'object-1', id: 1 },
+        { name: 'object-2', id: 2 },
+        { name: 'object-3', id: 3 },
+        { name: 'object-4', id: 4 },
+        { name: 'object-5', id: 5 }
+      ];
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [['id', '1']]
+          })
+        )
+      ).resolves.toStrictEqual([]);
+    });
+
+    it('discards objects that do not satisfy filters with deep string key', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [
+              ['subObject.subArray.1.name', (v) => Boolean(v?.toString().endsWith('5'))]
+            ]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([complexTargetObjects[0], complexTargetObjects[4]], {
+          excludeFirstAndLast: true
+        })
+      );
+    });
+
+    it('discards objects that do not satisfy filters with deep RegExp key', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [
+              [
+                /^subObject\.subArray\.\d+\.id/,
+                (v) => (v as number) % 2 === 0 || (v as number) === 1
+              ]
+            ]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          [...complexTargetObjects.slice(0, 2), ...complexTargetObjects.slice(3)],
+          { excludeFirstAndLast: true }
+        )
+      );
+    });
+
+    it('discards objects that do not satisfy filters with non-array object values', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [['subObject', complexTargetObjects[4].subObject]]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([complexTargetObjects[4]], {
+          excludeFirstAndLast: true
+        })
+      );
+    });
+
+    it('discards objects that do not satisfy filters with array values', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [['subObject.subArray', complexTargetObjects[0].subObject.subArray]]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([complexTargetObjects[0]], {
+          excludeFirstAndLast: true
+        })
+      );
+    });
+
+    it('discards objects that do not satisfy filters with null values', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject([{ a: 1 }, { a: null }, {}], { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: [['a', null]]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([{ a: null }], {
+          excludeFirstAndLast: true
+        })
+      );
+    });
+
+    it('discards all objects if no filters provided', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            filter: []
+          })
+        )
+      ).resolves.toStrictEqual([]);
+    });
+
+    it('respects pathSeparator option and passes it to internal packEntry stream', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          objectSieve({
+            pathSeparator: '->',
+            filter: [
+              [
+                /^subObject->subArray->\d+->id/,
+                (v) => (v as number) % 2 === 0 || (v as number) === 1
+              ]
+            ]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          [...complexTargetObjects.slice(0, 2), ...complexTargetObjects.slice(3)],
+          { excludeFirstAndLast: true }
+        )
+      );
+    });
+
+    it('passes root non-object primitives and arrays through the sieve without incident', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(
+            [1, 'string', true, false, null, [{ a: 1 }, { a: 1 }], { a: 1 }],
+            { excludeFirstAndLast: true }
+          ),
+          objectSieve({
+            filter: [[/^.*$/, () => false]]
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([1, 'string', true, false, null, [{ a: 1 }, { a: 1 }]], {
+          excludeFirstAndLast: true
+        })
+      );
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(
+            [1, 'string', true, false, null, [{ a: 1 }, { a: 1 }], { a: 1 }],
+            { excludeFirstAndLast: true }
+          ),
+          objectSieve({ filter: [] })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([1, 'string', true, false, null, [{ a: 1 }, { a: 1 }]], {
+          excludeFirstAndLast: true
+        })
+      );
+    });
+
+    it('handles chaining multiple sieves together', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          chain([
+            objectSieve({
+              filter: [
+                ['subObject.subArray.0.id', (v) => (v as number) > 3],
+                [/^subObject\.subArray\.\d+\.id/, (v) => (v as number) % 2 === 0]
+              ]
+            })
+          ])
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([complexTargetObjects[1], complexTargetObjects[3]], {
+          excludeFirstAndLast: true
+        })
+      );
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(complexTargetObjects, { excludeFirstAndLast: true }),
+          chain([
+            objectSieve({
+              filter: [['subObject.subArray.0.id', (v) => (v as number) > 3]]
+            }),
+            objectSieve({
+              filter: [[/^subObject\.subArray\.\d+\.id/, (v) => (v as number) % 2 === 0]]
+            })
+          ])
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([complexTargetObjects[3]], {
+          excludeFirstAndLast: true
+        })
+      );
     });
   });
 });
 
 describe('|>omit-entry', () => {
   describe('::omitEntry', () => {
-    it('todo', async () => {
+    const targetObjects = [
+      { a: 1, b: 'two', c: 3, d: false },
+      { a: 1, b: 2, c: 3, d: true },
+      { b: 2, c: 3, d: null },
+      { a: 'one', b: [{ a: 1, b: 'two', c: 3, d: false }] },
+      { b: { a: 1 }, c: { d: false } }
+    ] as const;
+
+    it('omits entries with keys matching key string', async () => {
       expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(tokenizeObject(targetObjects), omitEntry({ key: '0.a' }))
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj, index) => {
+            if (index === 0) {
+              const { a: _, ...result } = obj as { a: unknown };
+              return result;
+            } else {
+              return obj;
+            }
+          })
+        )
+      );
+    });
+
+    it('omits entries with keys matching RegExp string', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(tokenizeObject(targetObjects), omitEntry({ key: /^\d+\.a$/ }))
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj) => {
+            const { a: _, ...result } = obj as { a: unknown };
+            return result;
+          })
+        )
+      );
+    });
+
+    it('omits entries with keys matching one or more key strings or RegExps', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects),
+          omitEntry({ key: ['0.a', '0.b', 'x', /d$/] })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([
+          { c: 3 },
+          { a: 1, b: 2, c: 3 },
+          { b: 2, c: 3 },
+          { a: 'one', b: [{ a: 1, b: 'two', c: 3 }] },
+          { b: { a: 1 }, c: {} }
+        ])
+      );
+    });
+
+    it('omits entries in stream of non-array objects', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          omitEntry({ key: 'c' })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj) => {
+            const { c: _, ...result } = obj as { c: unknown };
+            return result;
+          }),
+          { excludeFirstAndLast: true }
+        )
+      );
+    });
+
+    it('omits entries with keys matching deep key', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(tokenizeObject(targetObjects), omitEntry({ key: '4.c.d' }))
+      ).resolves.toStrictEqual(
+        await tokenizeObject([
+          { a: 1, b: 'two', c: 3, d: false },
+          { a: 1, b: 2, c: 3, d: true },
+          { b: 2, c: 3, d: null },
+          { a: 'one', b: [{ a: 1, b: 'two', c: 3, d: false }] },
+          { b: { a: 1 }, c: {} }
+        ])
+      );
+    });
+
+    it('respects pathSeparator option and passes it to internal packEntry stream', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects),
+          omitEntry({ pathSeparator: '->', key: '4->c->d' })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([
+          { a: 1, b: 'two', c: 3, d: false },
+          { a: 1, b: 2, c: 3, d: true },
+          { b: 2, c: 3, d: null },
+          { a: 'one', b: [{ a: 1, b: 'two', c: 3, d: false }] },
+          { b: { a: 1 }, c: {} }
+        ])
+      );
+    });
+
+    it('omits entries even with keys are not packed', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { packValues: false }),
+          omitEntry({ key: '0.a' })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj, index) => {
+            if (index === 0) {
+              const { a: _, ...result } = obj as { a: unknown };
+              return result;
+            } else {
+              return obj;
+            }
+          }),
+          { packValues: false }
+        )
+      );
+    });
+
+    it('omits entries even with keys are not streamed', async () => {
+      expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { streamValues: false }),
+          omitEntry({ key: '0.a' })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj, index) => {
+            if (index === 0) {
+              const { a: _, ...result } = obj as { a: unknown };
+              return result;
+            } else {
+              return obj;
+            }
+          }),
+          { streamValues: false }
+        )
+      );
     });
   });
 });
 
-describe('|>select-one', () => {
-  describe('::selectOne', () => {
+describe('|>select-entry', () => {
+  describe('::selectEntry', () => {
+    const targetObject = {
+      metadata: 'some-data',
+      'something@else': { hello: 'world', true: false },
+      value: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }]
+    };
+
     it('todo', async () => {
       expect.hasAssertions();
     });

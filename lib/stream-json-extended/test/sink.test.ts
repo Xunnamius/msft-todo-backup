@@ -1152,5 +1152,13 @@ describe('|>pack-entry', () => {
         }
       ]);
     });
+
+    it('inserts sparse entry tokens at the appropriate points in the stream when operating in sparse mode', async () => {
+      expect.hasAssertions();
+    });
+
+    it('respects discardComponentTokens when operating in sparse mode', async () => {
+      expect.hasAssertions();
+    });
   });
 });

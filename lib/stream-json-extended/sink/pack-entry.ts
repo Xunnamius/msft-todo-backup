@@ -20,6 +20,28 @@ import type { JsonValue } from 'type-fest';
 export const packedEntrySymbol: unique symbol = Symbol('packed-entry');
 
 /**
+ * This symbol the `name` of every {@link JsonSparseEntryKeyStartToken}.
+ */
+export const sparseEntryKeyStartSymbol: unique symbol = Symbol('sparse-entry-key-start');
+
+/**
+ * This symbol the `name` of every {@link JsonSparseEntryKeyEndToken}.
+ */
+export const sparseEntryKeyEndSymbol: unique symbol = Symbol('sparse-entry-key-end');
+
+/**
+ * This symbol the `name` of every {@link JsonSparseEntryValueStartToken}.
+ */
+export const sparseEntryValueStartSymbol: unique symbol = Symbol(
+  'sparse-entry-value-start'
+);
+
+/**
+ * This symbol the `name` of every {@link JsonSparseEntryValueEndToken}.
+ */
+export const sparseEntryValueEndSymbol: unique symbol = Symbol('sparse-entry-value-end');
+
+/**
  * An extension of {@link JsonToken} that represents a packed object entry (a
  * key-value pair) along with other useful metadata.
  */
@@ -51,6 +73,60 @@ export type JsonPackedEntryToken = {
 };
 
 /**
+ * An subset of {@link JsonPackedEntryToken} that represents specific points in
+ * a stream of "sparsely packed" object entry (a key-value pair) tokens.
+ *
+ * @see {@link JsonSparseEntryKeyStartToken}
+ * @see {@link JsonSparseEntryKeyEndToken}
+ * @see {@link JsonSparseEntryValueStartToken}
+ * @see {@link JsonSparseEntryValueEndToken}
+ */
+export type JsonSparseEntryToken =
+  | JsonSparseEntryKeyStartToken
+  | JsonSparseEntryKeyEndToken
+  | JsonSparseEntryValueStartToken
+  | JsonSparseEntryValueEndToken;
+
+/**
+ * An subset of {@link JsonPackedEntryToken} that represents the beginning of a
+ * series of key tokens from a "sparsely packed" object entry (a key-value pair)
+ * along with other useful metadata.
+ */
+export type JsonSparseEntryKeyStartToken = Omit<
+  JsonPackedEntryToken,
+  'name' | 'value'
+> & { name: typeof sparseEntryKeyStartSymbol };
+
+/**
+ * An subset of {@link JsonPackedEntryToken} that represents the end of a series
+ * of key tokens from a "sparsely packed" object entry (a key-value pair) along
+ * with other useful metadata.
+ */
+export type JsonSparseEntryKeyEndToken = Omit<JsonPackedEntryToken, 'name' | 'value'> & {
+  name: typeof sparseEntryKeyEndSymbol;
+};
+
+/**
+ * An subset of {@link JsonPackedEntryToken} that represents the beginning of a
+ * series of value tokens from a "sparsely packed" object entry (a key-value
+ * pair) along with other useful metadata.
+ */
+export type JsonSparseEntryValueStartToken = Omit<
+  JsonPackedEntryToken,
+  'name' | 'value'
+> & { name: typeof sparseEntryValueStartSymbol };
+
+/**
+ * An subset of {@link JsonPackedEntryToken} that represents the end of a series
+ * of value tokens from a "sparsely packed" object entry (a key-value pair)
+ * along with other useful metadata.
+ */
+export type JsonSparseEntryValueEndToken = Omit<
+  JsonPackedEntryToken,
+  'name' | 'value'
+> & { name: typeof sparseEntryValueEndSymbol };
+
+/**
  * Filters through a {@link JsonToken} stream looking for an object entry key
  * matching `key`. Once a matching key token(s) is encountered, the tokens
  * representing its value will be packed in their entirety and emitted as a
@@ -59,14 +135,16 @@ export type JsonPackedEntryToken = {
  * Depending on the value of `discardComponentTokens`, said key and value tokens
  * may be discarded in lieu of the {@link JsonPackedEntryToken}.
  *
- * **Note that using `packEntry` has memory implications. Be wary choosing to
- * pack entries with massive keys (rare) or very large values (more common).**
+ * **Note that using `packEntry` has memory implications** (only when
+ * `sparseMode` is `false`). Be wary choosing to pack entries with massive keys
+ * (rare) or very large values (more common).
  */
 export function packEntry({
   key,
   discardComponentTokens = false,
   ownerSymbol,
   pathSeparator = '.',
+  sparseMode = false,
   ...assemblerTransformOptions
 }: FullAssemblerOptions &
   TransformOptions & {
@@ -90,8 +168,8 @@ export function packEntry({
     /**
      * If `true`, any token used to assemble the entry key-value pair will not
      * be seen downstream. That is: only the fully packed entry token will be
-     * seen once it has been completely assembled; the component tokens used
-     * to assemble the entry token will be discarded.
+     * seen once it has been completely assembled; the component tokens used to
+     * assemble the entry token will be discarded.
      *
      * @default false
      */
@@ -106,6 +184,30 @@ export function packEntry({
      * A string that separates stack values when it is converted to a string.
      */
     pathSeparator?: string;
+    /**
+     * If `true`, the entry will be "packed" without actually assembling its
+     * value. Essentially, instead of packing the entire entry, special tokens
+     * will be inserted into the stream before and after the key tokens and
+     * value tokens representing the entry. Those special tokens are:
+     *
+     * - {@link JsonSparseEntryKeyStartToken} before the first key-related
+     *   token.
+     * - {@link JsonSparseEntryKeyEndToken} after the last key-related token.
+     * - {@link JsonSparseEntryValueStartToken} before the first value-related
+     *   token.
+     * - {@link JsonSparseEntryValueEndToken} after the last value-related
+     *   token.
+     *
+     * `sparseMode` can be combined with `discardComponentTokens` if the
+     * "packed" entry's tokens are not actually needed.
+     *
+     * This mode is intended for use by other filters that wish to borrow the
+     * core entry packing algorithm without actually packing the entry, which
+     * could have negative implications for memory usage.
+     *
+     * @default false
+     */
+    sparseMode?: boolean;
   }) {
   // eslint-disable-next-line unicorn/prefer-set-has
   const keyTokenNames: JsonTokenName[] = ['startKey', 'endKey', 'keyValue'];
