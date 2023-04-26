@@ -1331,7 +1331,7 @@ describe('|>object-sieve', () => {
       ).resolves.toStrictEqual([]);
     });
 
-    it('respects pathSeparator option and passes it to internal packEntry stream', async () => {
+    it('respects pathSeparator option and passes it to its internal packEntry stream', async () => {
       expect.hasAssertions();
 
       await expect(
@@ -1529,7 +1529,7 @@ describe('|>omit-entry', () => {
       );
     });
 
-    it('respects pathSeparator option and passes it to internal packEntry stream', async () => {
+    it('respects pathSeparator option and passes it to its internal packEntry stream', async () => {
       expect.hasAssertions();
 
       await expect(
@@ -1604,7 +1604,27 @@ describe('|>select-entry', () => {
       value: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }]
     };
 
-    it('todo', async () => {
+    it('selects a non-array entry value and streams its tokens, discarding the rest of the object', async () => {
+      expect.hasAssertions();
+    });
+
+    it('selects each element of an entry value individually if said value is an array', async () => {
+      expect.hasAssertions();
+    });
+
+    it('selects entire entry value at once, even if said value is an array, when discardEnclosingArray is false', async () => {
+      expect.hasAssertions();
+    });
+
+    it('selects nothing, discarding all tokens, if the key filter does not match any entries', async () => {
+      expect.hasAssertions();
+    });
+
+    it('respects pathSeparator option and passes it to its internal packEntry stream', async () => {
+      expect.hasAssertions();
+    });
+
+    it('selects matching entry values from successive objects as they are streamed', async () => {
       expect.hasAssertions();
     });
   });
