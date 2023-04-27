@@ -111,8 +111,10 @@ const rules = {
   'unicorn/explicit-length-check': 'off',
   // ? I don't think so
   'unicorn/no-negated-condition': 'off',
-  // ? This is not it, chief (Prettier supersedes)
-  'unicorn/number-literal-case': 'off'
+  // ? This is not it, chief (Prettier prevails)
+  'unicorn/number-literal-case': 'off',
+  // ? I'll decide when I want switch cases for fallthrough or not, thanks
+  'unicorn/prefer-switch': 'off'
 };
 
 module.exports = {
