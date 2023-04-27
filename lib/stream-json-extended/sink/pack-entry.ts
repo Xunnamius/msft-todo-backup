@@ -127,17 +127,23 @@ export type JsonSparseEntryValueEndToken = Omit<
 > & { name: typeof sparseEntryValueEndSymbol };
 
 /**
- * Filters through a {@link JsonToken} stream looking for an object entry key
+ * Filters through a {@link JsonToken} stream looking for object entry keys
  * matching `key`. Once a matching key token(s) is encountered, the tokens
- * representing its value will be packed in their entirety and emitted as a
- * single {@link JsonPackedEntryToken}.
+ * representing the entry's value will be packed in their entirety and streamed
+ * as a single {@link JsonPackedEntryToken}.
  *
- * Depending on the value of `discardComponentTokens`, said key and value tokens
- * may be discarded in lieu of the {@link JsonPackedEntryToken}.
+ * If `discardComponentTokens` is `true`, said key and value tokens will be
+ * discarded in lieu of the {@link JsonPackedEntryToken}.
  *
- * **Note that using `packEntry` has memory implications** (only when
- * `sparseMode` is `false`). Be wary choosing to pack entries with massive keys
- * (rare) or very large values (more common).
+ * If `discardComponentTokens` is `false` (default), each
+ * {@link JsonPackedEntryToken} is guaranteed to occur in the stream immediately
+ * after the final token corresponding to its entry value.
+ *
+ * **Note that using `packEntry` has memory implications** when `sparseMode` is
+ * `false` and you're packing entries with massive values. Regardless of
+ * `sparseMode`, entry keys are _always_ assembled, so if you're packing entries
+ * with massive keys (which should almost never be the case) then you may wish
+ * to avoid using `packEntry`.
  */
 export function packEntry({
   key,
@@ -203,17 +209,22 @@ export function packEntry({
      *
      * This mode is intended for use by other filters that wish to borrow the
      * core entry packing algorithm without actually packing the entry, which
-     * could have negative implications for memory usage.
+     * could have negative implications for memory usage when packing large
+     * values.
      *
      * @default false
      */
     sparseMode?: boolean;
   }) {
-  // eslint-disable-next-line unicorn/prefer-set-has
-  const keyTokenNames: JsonTokenName[] = ['startKey', 'endKey', 'keyValue'];
-  const assembler = new FullAssembler(assemblerTransformOptions);
+  const keyTokenNames = [
+    'startKey',
+    'endKey',
+    'keyValue'
+  ] as const satisfies readonly JsonTokenName[];
+
+  const assembler = new FullAssembler({ ...assemblerTransformOptions, sparseMode });
   const { getStack, getHead, updateStack } = useStackKeyTracking();
-  const keyTokenBuffer: JsonToken[] = [];
+  const keyTokenBuffer: (JsonToken | JsonSparseEntryToken)[] = [];
   const keys = [key].flat();
 
   const releaseKeyTokenBuffer = function (this: Transform) {
@@ -229,117 +240,183 @@ export function packEntry({
     keyTokenBuffer.splice(0, keyTokenBuffer.length);
   };
 
+  // prettier-ignore
+  let packingState:
+    | 'idle'            // ? Scanning for keyTokenName tokens
+    | 'packing-key'     // ? Key token found, assembling key
+    | 'finalizing-key'  // ? Handling any remaining key tokens and sparse mode
+    | 'packing-value'   // ? Assembling value and/or handling sparse mode
+    | 'finalizing-value'// ? Handling any remaining value tokens and sparse mode
+    = 'idle';
+
   let matcher: string | RegExp;
-  let isPackingKey = false;
-  let isPackingValue = false;
-  let previouslyMatchedTokenName: JsonTokenName | undefined = undefined;
+  let sawFirstValueChunk: boolean;
+  let entryTokenBase: ReturnType<typeof getEntryTokenBase>;
 
   return new Transform({
     ...assemblerTransformOptions,
     objectMode: true,
-    transform(chunk: JsonToken, _encoding, callback_) {
-      updateStack(chunk);
-      const safeCallback = makeSafeCallback(callback_);
-
-      const shouldSkipAssembly =
-        (previouslyMatchedTokenName === 'endKey' && chunk.name === 'keyValue') ||
-        (previouslyMatchedTokenName === 'endString' && chunk.name === 'stringValue') ||
-        (previouslyMatchedTokenName === 'endNumber' && chunk.name === 'numberValue');
-
-      previouslyMatchedTokenName = undefined;
-
-      assert(isPackingKey !== isPackingValue || isPackingKey === false);
-
-      try {
-        // ? Account for values that are both streamed and packed
-        if (!shouldSkipAssembly) {
-          if (isPackingValue) {
-            typeSafeConsume(assembler, chunk);
-
-            if (assembler.done) {
-              isPackingValue = false;
-
-              if (!discardComponentTokens) {
-                // ? Ensure any end tokens are flushed before the entry token.
-                this.push(chunk);
-              }
-
-              const entryKey = getHead();
-              assert(typeof entryKey === 'string');
-
-              this.push({
-                name: packedEntrySymbol,
-                key: entryKey,
-                stack: getStack(),
-                matcher,
-                value: assembler.current,
-                owner: ownerSymbol
-              } satisfies JsonPackedEntryToken);
-
-              previouslyMatchedTokenName = chunk.name;
-            }
-
-            if (assembler.done || discardComponentTokens) {
-              // ? Ensure the token is not flushed downstream by the code below.
-              return safeCallback(null);
-            }
-          } else if (keyTokenNames.includes(chunk.name) || isPackingKey) {
-            isPackingKey = true;
-            typeSafeConsume(assembler, chunk);
-
-            if (assembler.done) {
-              const stackPath = getStackPath();
-              const potentialMatcher = keys.find((key) => {
-                return (
-                  (typeof key === 'string' && stackPath === key) ||
-                  (typeof key !== 'string' && stackPath.match(key))
-                );
-              });
-
-              isPackingKey = false;
-
-              if (potentialMatcher) {
-                matcher = potentialMatcher;
-                isPackingValue = true;
-
-                previouslyMatchedTokenName = chunk.name;
-
-                if (discardComponentTokens) {
-                  // ? If a match is found, discard its constituent tokens.
-                  discardKeyTokenBuffer();
-                  // ? Ensure the token is not flushed downstream by the code
-                  // ? below.
-                  return safeCallback(null);
-                }
-              } else if (discardComponentTokens) {
-                // ? If no match is found, flush the buffered tokens downstream.
-                releaseKeyTokenBuffer.call(this);
-                // ? Also, allow the current token to be flushed downstream too.
-              }
-            } else if (discardComponentTokens) {
-              // ? Capture the token into our buffer.
-              keyTokenBuffer.push(chunk);
-              // ? Ensure the token is not flushed downstream by the code below.
-              return safeCallback(null);
-            }
-          }
-        }
-
-        // ? Ensure we discard the packed version of streamed tokens that we
-        // ? ignored above, if necessary.
-        if (!shouldSkipAssembly || !discardComponentTokens) {
-          this.push(chunk);
-        }
-
-        safeCallback(null);
-      } catch (error) {
-        safeCallback(isNativeError(error) ? error : new Error(String(error)));
-      }
+    transform(chunk, _encoding, callback) {
+      return transform.call(this, chunk, callback);
     }
   });
 
-  function getStackPath() {
-    return getStack().join(pathSeparator);
+  function transform(
+    this: Transform,
+    chunk: JsonToken,
+    callback_: Parameters<typeof Transform.prototype._transform>[2],
+    isRerun = false
+  ): void {
+    const safeCallback = makeSafeCallback(callback_);
+
+    // ? Ensure the stack doesn't get corrupted by reruns.
+    if (!isRerun) {
+      updateStack(chunk);
+    }
+
+    try {
+      if (packingState === 'finalizing-value') {
+        const isOurValueToken =
+          chunk.name === 'numberValue' || chunk.name === 'stringValue';
+
+        if (isOurValueToken && !discardComponentTokens) {
+          this.push(chunk);
+        }
+
+        if (sparseMode) {
+          this.push({
+            ...entryTokenBase,
+            name: sparseEntryValueEndSymbol
+          } satisfies JsonSparseEntryValueEndToken);
+        } else {
+          this.push({
+            ...entryTokenBase,
+            name: packedEntrySymbol,
+            value: assembler.current
+          } satisfies JsonPackedEntryToken);
+        }
+
+        // ? Return to idle state.
+        packingState = 'idle';
+
+        if (!isOurValueToken) {
+          // ? If chunk isn't a numberValue or stringValue (so it's not our
+          // ? value token), then run it through the transformer again lest we
+          // ? lose it.
+          return transform.call(this, chunk, safeCallback, true);
+        }
+      } else if (packingState === 'packing-value') {
+        typeSafeConsume(assembler, chunk);
+
+        const isFirstValueChunk = !sawFirstValueChunk;
+        sawFirstValueChunk = true;
+
+        if (assembler.done) {
+          // ? Advance to the next state.
+          packingState = 'finalizing-value';
+        }
+
+        if (sparseMode && isFirstValueChunk) {
+          this.push({
+            ...entryTokenBase,
+            name: sparseEntryValueStartSymbol
+          } satisfies JsonSparseEntryValueStartToken);
+        }
+
+        if (!discardComponentTokens) {
+          this.push(chunk);
+        }
+      } else if (packingState === 'finalizing-key') {
+        if (chunk.name === 'keyValue') {
+          keyTokenBuffer.push(chunk);
+        }
+
+        if (discardComponentTokens) {
+          // ? If a match is found, discard its constituent tokens.
+          discardKeyTokenBuffer();
+        }
+
+        if (sparseMode) {
+          keyTokenBuffer.unshift({
+            ...entryTokenBase,
+            name: sparseEntryKeyStartSymbol
+          } satisfies JsonSparseEntryKeyStartToken);
+
+          keyTokenBuffer.push({
+            ...entryTokenBase,
+            name: sparseEntryKeyEndSymbol
+          } satisfies JsonSparseEntryKeyEndToken);
+        }
+
+        // ? Flush whatever's left of the key buffer.
+        releaseKeyTokenBuffer.call(this);
+        // ? Advance to the next state.
+        sawFirstValueChunk = false;
+        packingState = 'packing-value';
+
+        if (chunk.name !== 'keyValue') {
+          // ? If chunk isn't a keyValue (so it's a value token), then run it
+          // ? through the transformer again lest we lose it.
+          return transform.call(this, chunk, safeCallback, true);
+        }
+      } else if (
+        keyTokenNames.includes(chunk.name as (typeof keyTokenNames)[number]) ||
+        packingState === 'packing-key'
+      ) {
+        packingState = 'packing-key';
+
+        typeSafeConsume(assembler, chunk);
+        keyTokenBuffer.push(chunk);
+
+        if (assembler.done) {
+          const stackPath = getStackPath();
+          const potentialMatcher = keys.find((key) => {
+            return (
+              (typeof key === 'string' && stackPath === key) ||
+              (typeof key !== 'string' && stackPath.match(key))
+            );
+          });
+
+          if (potentialMatcher) {
+            matcher = potentialMatcher;
+            // ? Advance to the next state.
+            entryTokenBase = getEntryTokenBase();
+            packingState = 'finalizing-key';
+          } else {
+            // ? If no match is found, flush the buffered tokens downstream.
+            releaseKeyTokenBuffer.call(this);
+            // ? Return to idle state.
+            packingState = 'idle';
+          }
+        }
+      } else {
+        // ? packingState === 'idle'
+        this.push(chunk);
+      }
+
+      safeCallback(null);
+    } catch (error) {
+      safeCallback(isNativeError(error) ? error : new Error(String(error)));
+    }
+  }
+
+  function getEntryTokenBase() {
+    return {
+      key: getEntryKey(),
+      stack: getStack(),
+      matcher,
+      owner: ownerSymbol
+    };
+  }
+
+  function getEntryKey() {
+    const entryKey = getHead();
+    assert(typeof entryKey === 'string');
+    return entryKey;
+  }
+
+  function getStackPath(stack?: ReturnType<typeof getStack>) {
+    return (stack ?? getStack()).join(pathSeparator);
   }
 
   function typeSafeConsume(fullAssembler: FullAssembler, { name, value }: JsonToken) {
@@ -355,6 +432,7 @@ export function packEntry({
 
       default: {
         fullAssembler[name]();
+        break;
       }
     }
   }

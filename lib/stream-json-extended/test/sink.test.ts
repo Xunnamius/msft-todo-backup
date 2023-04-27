@@ -1,13 +1,23 @@
 /* eslint-disable unicorn/prevent-abbreviations */
 import { Readable } from 'node:stream';
+import { isProxy } from 'node:util/types';
 
 import {
   packEntry,
   bigStringParser,
   packedEntrySymbol,
   FullAssembler,
+  sparseEntryKeyStartSymbol,
+  sparseEntryKeyEndSymbol,
+  sparseEntryValueStartSymbol,
+  sparseEntryValueEndSymbol,
   type JsonToken,
-  type JsonPackedEntryToken
+  type JsonPackedEntryToken,
+  type JsonSparseEntryToken,
+  type JsonSparseEntryKeyStartToken,
+  type JsonSparseEntryKeyEndToken,
+  type JsonSparseEntryValueStartToken,
+  type JsonSparseEntryValueEndToken
 } from 'multiverse/stream-json-extended';
 
 import {
@@ -118,6 +128,35 @@ const mixedObjectTokens: JsonToken[] = [
   { name: 'numberValue', value: '40556077' },
   { name: 'endObject' },
   { name: 'endObject' }
+];
+
+const deepObjectTokens: JsonToken[][] = [
+  [
+    { name: 'startObject' },
+    { name: 'keyValue', value: 'a' },
+    { name: 'startObject' },
+    { name: 'keyValue', value: 'big' },
+    { name: 'stringValue', value: 'data' },
+    { name: 'keyValue', value: 'b' },
+    { name: 'startObject' },
+    { name: 'keyValue', value: 'big' },
+    { name: 'stringValue', value: 'data' },
+    { name: 'keyValue', value: 'c' },
+    { name: 'startObject' },
+    { name: 'keyValue', value: 'big' },
+    { name: 'stringValue', value: 'data' },
+    { name: 'keyValue', value: 'd' },
+    { name: 'startObject' },
+    { name: 'keyValue', value: 'e' },
+    { name: 'stringValue', value: 'deep' }
+  ],
+  [
+    { name: 'endObject' },
+    { name: 'endObject' },
+    { name: 'endObject' },
+    { name: 'endObject' },
+    { name: 'endObject' }
+  ]
 ];
 
 const stringTokens: JsonToken[] = [
@@ -378,17 +417,17 @@ describe('|>full-assembler', () => {
 
       objectTokens.forEach((jsonToken) => fullAssembler.consume(jsonToken));
 
-      expect(fullAssembler.done).toBe(true);
+      expect(fullAssembler.done).toBeTrue();
       expect(fullAssembler.current).toStrictEqual({ 'a-key': 1234, 'b-key': 'data' });
 
       stringTokens.forEach((jsonToken) => fullAssembler.consume(jsonToken));
 
-      expect(fullAssembler.done).toBe(true);
+      expect(fullAssembler.done).toBeTrue();
       expect(fullAssembler.current).toBe('data');
 
       numberTokens.forEach((jsonToken) => fullAssembler.consume(jsonToken));
 
-      expect(fullAssembler.done).toBe(true);
+      expect(fullAssembler.done).toBeTrue();
       expect(fullAssembler.current).toBe(1234);
     });
 
@@ -398,6 +437,86 @@ describe('|>full-assembler', () => {
       const fullAssembler = new FullAssembler();
       // ? TypeScript type check errors will fail lint, thus "failing" this test
       expect(fullAssembler[fakeToken.name]).toBeUndefined();
+    });
+
+    it('does not store assembled data when operating in sparse mode', async () => {
+      expect.hasAssertions();
+
+      const fullAssembler = new FullAssembler({ sparseMode: true });
+
+      deepObjectTokens[0].forEach((jsonToken) => fullAssembler.consume(jsonToken));
+
+      expect(fullAssembler.done).toBeFalse();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+      expect(fullAssembler.stack).toStrictEqual([
+        fullAssembler.current,
+        'a',
+        fullAssembler.current,
+        'b',
+        fullAssembler.current,
+        'c',
+        fullAssembler.current,
+        'd'
+      ]);
+
+      deepObjectTokens[1].forEach((jsonToken) => fullAssembler.consume(jsonToken));
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+      expect(fullAssembler.stack).toStrictEqual([]);
+
+      stringTokens.forEach((jsonToken) => fullAssembler.consume(jsonToken));
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+      expect(fullAssembler.stack).toStrictEqual([]);
+
+      numberTokens.forEach((jsonToken) => fullAssembler.consume(jsonToken));
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+      expect(fullAssembler.stack).toStrictEqual([]);
+    });
+
+    it('triggers "done" in sparse mode at the same points as default', async () => {
+      expect.hasAssertions();
+
+      const fullAssembler = await consumeTokenizedObject(
+        new FullAssembler({ sparseMode: true }),
+        targetObject
+      );
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+
+      await consumeTokenizedObject(fullAssembler, targetObject.d);
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+
+      await consumeTokenizedObject(fullAssembler, targetObject.a, {
+        lastValueIsPackedDuplicate: true
+      });
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+
+      await consumeTokenizedObject(fullAssembler, targetObject.b, {
+        lastValueIsPackedDuplicate: true
+      });
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+
+      await consumeTokenizedObject(fullAssembler, targetObject.g);
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
+
+      await consumeTokenizedObject(fullAssembler, targetObject.i);
+
+      expect(fullAssembler.done).toBeTrue();
+      expect(fullAssembler.current).toSatisfy(isProxy);
     });
   });
 });
@@ -680,6 +799,123 @@ describe('|>pack-entry', () => {
           owner: undefined,
           value: targetObject.i
         }
+      ]);
+    });
+
+    it('emits entry token immediately after the final token representing the entry value', async () => {
+      expect.hasAssertions();
+
+      const { a, b, e, f, g, h, i } = targetObject;
+      await expect(
+        feedTokenStream(
+          tokenizeObject(
+            { a, b, e, f, g, h, i },
+            { streamValues: true, packValues: true }
+          ),
+          packEntry({ key: [/^\w$/] })
+        )
+      ).resolves.toStrictEqual<(JsonToken | JsonPackedEntryToken)[]>([
+        { name: 'startObject' },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'a' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'a' },
+        { name: 'startNumber' },
+        { name: 'numberChunk', value: '1' },
+        { name: 'endNumber' },
+        { name: 'numberValue', value: '1' },
+        {
+          key: 'a',
+          matcher: /^\w$/,
+          stack: ['a'],
+          name: packedEntrySymbol,
+          owner: undefined,
+          value: a
+        },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'b' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'b' },
+        { name: 'startString' },
+        { name: 'stringChunk', value: 'data' },
+        { name: 'endString' },
+        { name: 'stringValue', value: 'data' },
+        {
+          key: 'b',
+          matcher: /^\w$/,
+          stack: ['b'],
+          name: packedEntrySymbol,
+          owner: undefined,
+          value: b
+        },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'e' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'e' },
+        { name: 'startObject' },
+        { name: 'endObject' },
+        {
+          key: 'e',
+          matcher: /^\w$/,
+          stack: ['e'],
+          name: packedEntrySymbol,
+          owner: undefined,
+          value: e
+        },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'f' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'f' },
+        { name: 'startArray' },
+        { name: 'endArray' },
+        {
+          key: 'f',
+          matcher: /^\w$/,
+          stack: ['f'],
+          name: packedEntrySymbol,
+          owner: undefined,
+          value: f
+        },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'g' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'g' },
+        { name: 'trueValue', value: true },
+        {
+          key: 'g',
+          matcher: /^\w$/,
+          stack: ['g'],
+          name: packedEntrySymbol,
+          owner: undefined,
+          value: g
+        },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'h' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'h' },
+        { name: 'falseValue', value: false },
+        {
+          key: 'h',
+          matcher: /^\w$/,
+          stack: ['h'],
+          name: packedEntrySymbol,
+          owner: undefined,
+          value: h
+        },
+        { name: 'startKey' },
+        { name: 'stringChunk', value: 'i' },
+        { name: 'endKey' },
+        { name: 'keyValue', value: 'i' },
+        { name: 'nullValue', value: null },
+        {
+          key: 'i',
+          matcher: /^\w$/,
+          stack: ['i'],
+          name: packedEntrySymbol,
+          owner: undefined,
+          value: i
+        },
+        { name: 'endObject' }
       ]);
     });
 
@@ -1155,10 +1391,162 @@ describe('|>pack-entry', () => {
 
     it('inserts sparse entry tokens at the appropriate points in the stream when operating in sparse mode', async () => {
       expect.hasAssertions();
+
+      const sparseObject = { a: { value: 1 }, b: { value: 2 }, c: { value: 3 } };
+      const owner = Symbol('owner');
+      const baseSparseToken = {
+        key: 'b',
+        matcher: 'b',
+        owner,
+        stack: ['b']
+      };
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(sparseObject, { streamValues: false }),
+          packEntry({ key: 'b', sparseMode: true, ownerSymbol: owner })
+        )
+      ).resolves.toStrictEqual<(JsonToken | JsonSparseEntryToken)[]>([
+        { name: 'startObject' },
+        { name: 'keyValue', value: 'a' },
+        { name: 'startObject' },
+        { name: 'keyValue', value: 'value' },
+        { name: 'numberValue', value: '1' },
+        { name: 'endObject' },
+        {
+          name: sparseEntryKeyStartSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryKeyStartToken,
+        { name: 'keyValue', value: 'b' },
+        {
+          name: sparseEntryKeyEndSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryKeyEndToken,
+        {
+          name: sparseEntryValueStartSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryValueStartToken,
+        { name: 'startObject' },
+        { name: 'keyValue', value: 'value' },
+        { name: 'numberValue', value: '2' },
+        { name: 'endObject' },
+        {
+          name: sparseEntryValueEndSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryValueEndToken,
+        { name: 'keyValue', value: 'c' },
+        { name: 'startObject' },
+        { name: 'keyValue', value: 'value' },
+        { name: 'numberValue', value: '3' },
+        { name: 'endObject' },
+        { name: 'endObject' }
+      ]);
     });
 
     it('respects discardComponentTokens when operating in sparse mode', async () => {
       expect.hasAssertions();
+
+      const sparseObject = { b: { value: 2 } };
+      const owner = Symbol('owner');
+      const baseSparseToken = {
+        key: 'b',
+        matcher: 'b',
+        owner,
+        stack: ['b']
+      };
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(sparseObject, { streamValues: false }),
+          packEntry({
+            key: 'b',
+            sparseMode: true,
+            discardComponentTokens: true,
+            ownerSymbol: owner
+          })
+        )
+      ).resolves.toStrictEqual<(JsonToken | JsonSparseEntryToken)[]>([
+        { name: 'startObject' },
+        {
+          name: sparseEntryKeyStartSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryKeyStartToken,
+        {
+          name: sparseEntryKeyEndSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryKeyEndToken,
+        {
+          name: sparseEntryValueStartSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryValueStartToken,
+        {
+          name: sparseEntryValueEndSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryValueEndToken,
+        { name: 'endObject' }
+      ]);
+    });
+
+    it('streams complex token stream in the correct order when operating in sparse mode and discardComponentTokens is true', async () => {
+      expect.hasAssertions();
+
+      const baseSparseToken = {
+        key: 'a',
+        matcher: '0.a',
+        owner: undefined,
+        stack: [0, 'a']
+      };
+
+      const targetObjects = [
+        { a: 1, b: 'two', c: 3, d: false },
+        { a: 1, b: 2, c: 3, d: true },
+        { b: 2, c: 3, d: null },
+        { a: 'one', b: [{ a: 1, b: 'two', c: 3, d: false }] },
+        { b: { a: 1 }, c: { d: false } }
+      ] as const;
+
+      const expectedTokens: (JsonToken | JsonSparseEntryToken)[] = await tokenizeObject(
+        targetObjects.map((obj, index) => {
+          if (index === 0) {
+            const { a: _, ...result } = obj as { a: unknown };
+            return result;
+          } else {
+            return obj;
+          }
+        })
+      );
+
+      expectedTokens.splice(
+        2,
+        0,
+        {
+          name: sparseEntryKeyStartSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryKeyStartToken,
+        {
+          name: sparseEntryKeyEndSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryKeyEndToken,
+        {
+          name: sparseEntryValueStartSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryValueStartToken,
+        {
+          name: sparseEntryValueEndSymbol,
+          ...baseSparseToken
+        } satisfies JsonSparseEntryValueEndToken
+      );
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects),
+          packEntry({
+            key: '0.a',
+            sparseMode: true,
+            discardComponentTokens: true
+          })
+        )
+      ).resolves.toStrictEqual(expectedTokens);
     });
   });
 });

@@ -1606,26 +1606,77 @@ describe('|>select-entry', () => {
 
     it('selects a non-array entry value and streams its tokens, discarding the rest of the object', async () => {
       expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(tokenizeObject(targetObject), selectEntry({ key: 'metadata' }))
+      ).resolves.toStrictEqual([
+        { name: 'startString' },
+        { name: 'stringChunk', value: 'some-data' },
+        { name: 'endString' },
+        { name: 'stringValue', value: 'some-data' }
+      ]);
     });
 
     it('selects each element of an entry value individually if said value is an array', async () => {
       expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(tokenizeObject(targetObject), selectEntry({ key: 'value' }))
+      ).resolves.toStrictEqual(
+        await tokenizeObject(targetObject.value, { excludeFirstAndLast: true })
+      );
     });
 
     it('selects entire entry value at once, even if said value is an array, when discardEnclosingArray is false', async () => {
       expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObject),
+          selectEntry({ key: 'value', discardEnclosingArray: false })
+        )
+      ).resolves.toStrictEqual(await tokenizeObject(targetObject.value));
     });
 
     it('selects nothing, discarding all tokens, if the key filter does not match any entries', async () => {
       expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(tokenizeObject(targetObject), selectEntry({ key: 'x' }))
+      ).resolves.toStrictEqual([]);
     });
 
     it('respects pathSeparator option and passes it to its internal packEntry stream', async () => {
       expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObject),
+          selectEntry({ key: /^value\.\d+\.id$/ })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([1, 2, 3, 4, 5], { excludeFirstAndLast: true })
+      );
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObject),
+          selectEntry({ key: /^value->\d+->id$/, pathSeparator: '->' })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject([1, 2, 3, 4, 5], { excludeFirstAndLast: true })
+      );
     });
 
-    it('selects matching entry values from successive objects as they are streamed', async () => {
+    it('selects nothing, discarding all tokens, if only non-entry tokens are streamed', async () => {
       expect.hasAssertions();
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject([1, 'one', true, false, null], { excludeFirstAndLast: true }),
+          selectEntry({ key: /.*/ })
+        )
+      ).resolves.toStrictEqual([]);
     });
   });
 });

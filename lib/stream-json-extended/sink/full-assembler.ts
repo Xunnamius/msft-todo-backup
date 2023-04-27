@@ -2,11 +2,28 @@ import Assembler, { type AssemblerOptions } from 'stream-json/Assembler';
 
 import type { JsonToken, JsonTokenName } from 'multiverse/stream-json-extended';
 import type { AnyFunction } from '@xunnamius/types';
+import { JsonValue } from 'type-fest';
 
 /**
  * Options used to configure {@link FullAssembler}.
  */
-export type FullAssemblerOptions = AssemblerOptions;
+export type FullAssemblerOptions = AssemblerOptions & {
+  /**
+   * If `true`, `FullAssembler` will "assemble" the tokens it consumes, keeping
+   * track of the `depth`, `stack`, `path`, `key`, and `done`, but `current`
+   * will always be black hole Proxy and non-key token value data will never be
+   * stored. This implies that `stack` will be full of `[Proxy, key]` pairs.
+   *
+   * This mode is intended for use by higher level {@link JsonToken} consumers
+   * that wish to borrow the core token assembly algorithm (specifically,
+   * tracking of the "done" state) without actually assembling the entry, which
+   * could have negative implications for memory usage when assembling large
+   * values.
+   *
+   * @default false
+   */
+  sparseMode?: boolean;
+};
 
 /**
  * The {@link JsonTokenName}s that require further assembly by
@@ -53,7 +70,8 @@ export class FullAssembler extends Assembler {
   protected falseValue: EmptyAssemblerMethod;
 
   constructor(options?: FullAssemblerOptions) {
-    super(options);
+    const { sparseMode, ...assemblerOptions } = options || {};
+    super(assemblerOptions);
 
     this.startNumber = withPreviousTokenTracking.call(this, beginAssemblingToken);
     this.startString = withPreviousTokenTracking.call(this, beginAssemblingToken);
@@ -110,11 +128,37 @@ export class FullAssembler extends Assembler {
     this.trueValue = withPreviousTokenTracking.call(this, super.trueValue);
     //@ts-expect-error: @types package is missing some superclass methods
     this.falseValue = withPreviousTokenTracking.call(this, super.falseValue);
+
+    if (sparseMode) {
+      const proxy = new Proxy(
+        {},
+        {
+          get(_target, _key) {
+            return null;
+          },
+          set(_target, _key, _value) {
+            return true;
+          }
+        }
+      );
+
+      Object.defineProperty(this, 'current', {
+        get() {
+          return proxy;
+        },
+        set(value) {
+          // * Ain't Nobody Here But Us Chickens
+          void value;
+        },
+        enumerable: true,
+        configurable: true
+      });
+    }
   }
 
-  // @ts-expect-error: @types package is suboptimal, let's fix it
-  consume(chunk: JsonToken) {
-    // @ts-expect-error: @types package is suboptimal, let's fix it
+  // @ts-expect-error: @types package is suboptimal
+  public override consume(chunk: JsonToken) {
+    // @ts-expect-error: @types package is suboptimal
     return super.consume(chunk);
   }
 }
