@@ -2,7 +2,6 @@ import Assembler, { type AssemblerOptions } from 'stream-json/Assembler';
 
 import type { JsonToken, JsonTokenName } from 'multiverse/stream-json-extended';
 import type { AnyFunction } from '@xunnamius/types';
-import { JsonValue } from 'type-fest';
 
 /**
  * Options used to configure {@link FullAssembler}.

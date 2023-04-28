@@ -228,17 +228,27 @@ describe('|>inject-entry', () => {
                     seenTokenNames.push(chunk.name);
                     callback(null);
                   },
-                  async read() {
+                  read() {
                     if (transformedTokens === undefined) {
-                      transformedTokens = await tokenizeObject(seenTokenNames, {
+                      void tokenizeObject(seenTokenNames, {
                         streamValues: false,
                         packValues: true
-                      });
-                    }
+                      })
+                        .then((tokens) => {
+                          transformedTokens = tokens;
 
-                    this.push(
-                      transformedTokens.length === 0 ? null : transformedTokens.shift()
-                    );
+                          this.push(
+                            transformedTokens.length === 0
+                              ? null
+                              : transformedTokens.shift()
+                          );
+                        })
+                        .catch((error) => this.destroy(error));
+                    } else {
+                      this.push(
+                        transformedTokens.length === 0 ? null : transformedTokens.shift()
+                      );
+                    }
                   }
                 });
               }
@@ -577,7 +587,7 @@ describe('|>inject-entry', () => {
                     packEntry({ key: 'name', ownerSymbol }),
                     new Duplex({
                       objectMode: true,
-                      async write(
+                      write(
                         chunk: JsonToken | JsonPackedEntryToken,
                         _encoding,
                         callback
@@ -590,12 +600,17 @@ describe('|>inject-entry', () => {
                             'renamed-object-' +
                             ((chunk.value as string).split('-').at(1) || '???');
 
-                          tokenBuffer.push(...(await tokenizeObject(updatedName)));
+                          void tokenizeObject(updatedName)
+                            .then((tokens) => {
+                              tokenBuffer.push(...tokens);
+                              callback(null);
+                            })
+                            .catch((error) => callback(error));
+                        } else {
+                          callback(null);
                         }
-
-                        callback(null);
                       },
-                      async read() {
+                      read() {
                         this.once('finish', () => {
                           if (tokenBuffer.length) {
                             tokenBuffer.forEach((token) => this.push(token));
@@ -660,7 +675,7 @@ describe('|>inject-entry', () => {
                     packEntry({ key: 'name', ownerSymbol }),
                     new Transform({
                       objectMode: true,
-                      async transform(
+                      transform(
                         chunk: JsonToken | JsonPackedEntryToken,
                         _encoding,
                         callback
@@ -673,12 +688,17 @@ describe('|>inject-entry', () => {
                             'renamed-object-' +
                             ((chunk.value as string).split('-').at(1) || '???');
 
-                          tokenBuffer.push(...(await tokenizeObject(updatedName)));
+                          void tokenizeObject(updatedName)
+                            .then((tokens) => {
+                              tokenBuffer.push(...tokens);
+                              callback(null);
+                            })
+                            .catch((error) => callback(error));
+                        } else {
+                          callback(null);
                         }
-
-                        callback(null);
                       },
-                      async flush() {
+                      flush() {
                         if (tokenBuffer.length) {
                           tokenBuffer.forEach((token) => this.push(token));
                         } else {

@@ -11,11 +11,16 @@ import { isNativeError } from 'node:util/types';
 import assert from 'node:assert';
 
 import { chain } from 'stream-chain';
-import { omitEntry } from 'multiverse/stream-json-extended';
 
-import { escapeRegExp } from 'multiverse/stream-json-extended/util/escape-regexp';
-import { type JsonToken, useStackKeyTracking } from 'multiverse/stream-json-extended';
-import { makeSafeCallback } from 'multiverse/stream-json-extended/util/make-safe-callback';
+import {
+  type JsonToken,
+  useStackKeyTracking,
+  omitEntry
+} from 'multiverse/stream-json-extended';
+
+import { escapeRegExp } from 'multiverse/escape-regexp';
+import { makeSafeCallback } from 'multiverse/make-safe-callback';
+
 import type { Promisable } from 'type-fest';
 
 /**
@@ -224,30 +229,43 @@ export function injectEntry({
   const passThroughToValueTokenStream = new Transform({
     ...transformOptions,
     objectMode: true,
-    async transform(chunk, _encoding, callback_) {
+    async transform(chunk, encoding, callback_) {
       const safeCallback = makeSafeCallback(callback_);
+
+      const advanceToNext: Parameters<typeof Transform.prototype._transform>[2] =
+        function (this: Transform, error) {
+          this.push(chunk);
+
+          // ? This is required to let the rest of the pipeline process our
+          // ? chunks and pump valueTokenStream before we start processing new
+          // ? chunks. Synchronization is necessary here because the
+          // ? passThroughToValueTokenStream and injectionStream streams share
+          // ? state (i.e. valueTokenStream).
+          // ?
+          // ? setImmediate is used instead of process.nextTick so safeCallback
+          // ? is scheduled after any awaited I/O or network requests while the
+          // ? rest of the pipeline chugs along.
+          setImmediate(() => safeCallback(error));
+        };
 
       try {
         // * Similar to putting the lines after this in process.nextTick(...)
         valueTokenStream ??= await valueTokenStreamFactory();
         const valueTokenStreamIsAWritable = 'writable' in valueTokenStream;
 
-        if (valueTokenStreamIsAWritable && !(valueTokenStream as Duplex).write(chunk)) {
-          valueTokenStream.destroy();
-          return safeCallback(
-            new Error('backpressure deadlock: value token stream high water mark reached')
-          );
+        if (valueTokenStreamIsAWritable) {
+          const duplex = valueTokenStream as Duplex;
+          if (!duplex.write(chunk, encoding, advanceToNext.bind(this))) {
+            duplex.destroy();
+            return safeCallback(
+              new Error(
+                'backpressure deadlock: value token stream high water mark reached'
+              )
+            );
+          }
+        } else {
+          advanceToNext.call(this, null);
         }
-
-        this.push(chunk);
-
-        // ? This is required to let the rest of the pipeline process our chunks
-        // ? and pump valueTokenStream before we start processing new chunks.
-        // ? This is especially useful if valueTokenStream is using async/await,
-        // ? since setImmediate (unlike process.nextTick) schedules safeCallback
-        // ? to be invoked after any awaited I/O or network requests while the
-        // ? rest of the pipeline chugs along.
-        setImmediate(() => safeCallback(null));
       } catch (error) {
         safeCallback(isNativeError(error) ? error : new Error(String(error)));
       }
@@ -292,7 +310,7 @@ export function injectEntry({
             }
 
             const onData = (chunk: unknown) => {
-              if (!this.push(chunk) && localValueTokenStream) {
+              if (!this.push(chunk)) {
                 localValueTokenStream.pause();
                 // ? Handle backpressure during unbounded chunk inflation. Use
                 // ? setImmediate to give whatever caused the pause a chance to
@@ -317,8 +335,8 @@ export function injectEntry({
             localValueTokenStream.on('end', onEnd);
             localValueTokenStream.on('data', onData);
 
-            // ? If the stream was handed to us in an unreadable state, do ?
-            // cleanup immediately.
+            // ? If the stream was handed to us in an unreadable state, do
+            // ? cleanup immediately.
             if (!localValueTokenStream.readable) {
               onEnd(
                 localValueTokenStream.readable === undefined

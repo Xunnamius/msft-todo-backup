@@ -10,7 +10,7 @@ import {
   type FullAssemblerOptions
 } from 'multiverse/stream-json-extended';
 
-import { makeSafeCallback } from 'multiverse/stream-json-extended/util/make-safe-callback';
+import { makeSafeCallback } from 'multiverse/make-safe-callback';
 
 import type { JsonValue } from 'type-fest';
 
