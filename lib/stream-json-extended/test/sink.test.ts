@@ -27,6 +27,7 @@ import {
 
 import type { DisassemblerOptions } from 'stream-json/Disassembler';
 import type { JsonValue } from 'type-fest';
+import { bigStringStringer } from '../sink/big-string-stringer';
 
 const targetObject = {
   a: 1,
@@ -197,6 +198,32 @@ describe('|>big-string-parser', () => {
         { name: 'endString' },
         { name: 'endObject' }
       ]);
+    });
+  });
+});
+
+describe('|>big-string-stringer', () => {
+  describe('::bigStringStringer', () => {
+    it('only streams strings and packs all other values', async () => {
+      expect.hasAssertions();
+
+      const { a, b } = targetObject;
+      const stream = (
+        await Readable.from([
+          { name: 'startObject' },
+          { name: 'keyValue', value: 'a' },
+          { name: 'numberValue', value: '1' },
+          { name: 'keyValue', value: 'b' },
+          { name: 'startString' },
+          { name: 'stringChunk', value: 'data' },
+          { name: 'endString' },
+          { name: 'endObject' }
+        ])
+          .pipe(bigStringStringer())
+          .toArray()
+      ).map((item) => item.toString('utf8'));
+
+      expect(stream).toStrictEqual([JSON.stringify({ a, b })]);
     });
   });
 });
