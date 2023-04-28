@@ -88,7 +88,7 @@
     "lodash.ismatch": "^4.4.0",
     "mime-types": "^2.1.35",
     "node-fetch": "^3.3.1",
-    "stream-chain": "^2.2.5",
+    "stream-chain": "https://xunn.at/stream-chain",
     "stream-fork": "https://xunn.at/stream-fork",
     "stream-json": "^1.7.5"
   },
