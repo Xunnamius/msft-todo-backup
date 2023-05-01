@@ -7,32 +7,23 @@ import type {
 } from '@microsoft/microsoft-graph-types';
 
 /**
- * An array literal representation of {@link SupportedFileFormat}.
- */
-export const supportedFileFormats = ['json'] as const;
-
-/**
- * A file format input/output type supported by this tool.
- */
-export type SupportedFileFormat = (typeof supportedFileFormats)[number];
-
-/**
  * An array of backed up task lists.
  */
-export type BackupData = AsyncIterableIterator<BackupListData>;
+export type BackupData = BackupListData[];
 
 /**
  * An individual backed up task list.
  */
-export type BackupListData = Omit<TodoTaskList, 'tasks'> & {
-  tasks: AsyncIterableIterator<BackupTaskData>;
+export type BackupListData = Omit<TodoTaskList, 'tasks' | 'extensions'> & {
+  tasks: BackupTaskData[];
 };
 
 /**
  * An individual backed up task.
  */
-export type BackupTaskData = Omit<TodoTask, 'attachments'> & {
-  attachments: AsyncIterableIterator<Required<TaskFileAttachment>>;
+export type BackupTaskData = Omit<TodoTask, 'attachments' | 'extensions'> & {
+  attachments: (Omit<TaskFileAttachment, 'contentBytes' | 'id' | 'contentType'> &
+    Required<Pick<TaskFileAttachment, 'id' | 'contentType'>>)[];
 };
 
 /**
@@ -76,10 +67,17 @@ export type BackupFileMetadata = {
  * Metadata for an individual list within a backup file.
  */
 export type BackupListMetadata = {
-  index: Index;
+  id: string;
   displayName: string;
-  totalTasks: number;
-  tasksCompleted: number;
+  tasks: BackupTaskMetadata[];
+};
+
+/**
+ * Metadata for an individual task within a backup file.
+ */
+export type BackupTaskMetadata = {
+  id: string;
+  titleHash: string;
 };
 
 /**

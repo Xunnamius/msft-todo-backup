@@ -1,23 +1,40 @@
 /* eslint-disable jest/no-conditional-in-test */
 import { toss } from 'toss-expression';
 
+import { Client } from '@microsoft/microsoft-graph-client';
 import * as lib from 'universe/lib/msft';
 
-import type { AnyFunction } from '@xunnamius/jest-types';
+import { asMockedFunction } from '@xunnamius/jest-types';
+import type { ApplicationAuthenticationData, BackupData } from 'types/global';
 
-// TODO: add this to typescript-utils
-type SpiedFunction<T extends AnyFunction> = jest.SpyInstance<
-  ReturnType<T>,
-  Parameters<T>
->;
+jest.mock('@microsoft/microsoft-graph-client');
 
-// let XSpy: SpiedFunction<typeof X>;
+// eslint-disable-next-line jest/unbound-method
+const mockedClientInitWithMiddleware = asMockedFunction(Client.initWithMiddleware);
 
 beforeEach(() => {
-  // TODO
+  mockedClientInitWithMiddleware.mockImplementation(() => {
+    return {
+      api() {
+        // TODO
+      }
+    } as unknown as Client;
+  });
 });
 
-describe('::testAuthCredentials', () => {
+describe('::testApiAuthCredentials', () => {
+  it('todo', async () => {
+    expect.hasAssertions();
+  });
+});
+
+describe('::getListsFromApi', () => {
+  it('todo', async () => {
+    expect.hasAssertions();
+  });
+});
+
+describe('::putListsToApi', () => {
   it('todo', async () => {
     expect.hasAssertions();
   });
