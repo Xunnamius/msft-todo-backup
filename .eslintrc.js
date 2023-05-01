@@ -86,7 +86,8 @@ const rules = {
         dest: false,
         obj: false,
         val: false,
-        env: false
+        env: false,
+        temp: false
       },
       ignore: [/stderr/i]
     }
