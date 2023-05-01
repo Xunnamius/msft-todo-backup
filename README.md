@@ -23,9 +23,9 @@ time, created date and time, due date and time, unique id, importance, last
 modified date and time, recurrence pattern, reminder date and time, start date
 and time, status, title, attachments, and checklist items (so-called "steps").
 
-This tool was built using async iterators and streams to ensure proper function
-in low-memory environments (i.e. 1-2G RAM odroids). Additionally, unattended
-backups, throttling, and automatic retrying are supported out of the box.
+This tool was built using streams to ensure proper function in low-memory
+environments. Additionally, unattended backups, throttling, and automatic
+retrying are supported out of the box.
 
 However, while attachment and checklist items are backed up and can be restored,
 linked resources and extensions are ignored.
@@ -130,8 +130,7 @@ msft-todo-backup backup list-1 list-2 list-3
 ```
 
 The backup process is non-destructive (read-only). Backups are stored at
-`~/msft-todo-backups/{dateTimeMs}.json` on Linux and
-`%USERPROFILE%\msft-todo-backups\{dateTimeMs}.json` on Windows.
+`~/msft-todo-backups` on Linux and `%USERPROFILE%\msft-todo-backups` on Windows.
 
 You can specify how many backups to keep around with the `--keep-num-backups`
 flag:
@@ -141,23 +140,14 @@ flag:
 msft-todo-backup backup list-1 list-2 --keep-num-backups 5
 ```
 
-You can specify what format you want backups to be saved in. This will also
-affect the file extension.
-
-```shell
-msft-todo-backup backup list-1 list-2 --format json
-```
-
-Currently, the only backup format available is `json`.
-
 If the backup is interrupted or fails, a partial backup will be available at
-`~/msft-todo-backups/{dateTimeMs}-partial.json`. Reattempting the backup process
-will immediately delete any partial backup files, so save it someplace else if
-you want to keep it.
+`~/msft-todo-backups/...-partial.json`. Reattempting the backup process will
+immediately delete any partial backup files, so save it someplace else if you
+want to keep it.
 
 #### Automatic Backups
 
-Once `msft-todo-backup authenticate` has been run successfully at least once,
+Once `msft-todo-backup authenticate` has executed successfully at least once,
 and your access/refresh tokens have not expired, backups can be performed
 automatically in the background without you having to do anything. For example,
 to backup your Microsoft Todo tasks once a day, you can run
@@ -194,8 +184,9 @@ or deleted; all operations are append-only. Therefore, if the restoration is
 interrupted or fails, it can be safely restarted without worrying about
 duplicates or missing/lost/partial data.
 
-Further, lists with the same display name will not be recreated. Similarly,
-tasks with the same body contents and content type will not be recreated.
+Further, restored items are deeply deduplicated by default: lists with the same
+display name will not be recreated. Similarly, tasks with the same title will
+not be recreated.
 
 #### Dangerous Restoration
 
@@ -205,9 +196,9 @@ other non-default "dangerous" restoration modes:
 ##### `--shallow-deduplication`
 
 Unlike `--deep-deduplication`, which deduplicates using list display names and
-task bodies, `--shallow-deduplication` deduplicates using the IDs of lists and
-tasks. For accounts with a lot of data-heavy tasks, this can speed things up
-somewhat.
+task titles, `--shallow-deduplication` deduplicates using the IDs of lists and
+tasks. For accounts with a lot of data-heavy tasks, this can potentially speed
+things up somewhat.
 
 However, since the creation of new lists/tasks results in those lists/tasks
 having new IDs, restoration operations using `--shallow-deduplication` are
@@ -228,8 +219,9 @@ the lists and tasks that already exist in the account. This will likely result
 in many duplicates and will require manual resolution and list merging by the
 user.
 
-You can use this mode to create an exact copy of a list. For example, to make a
-copy of "My Special List", you could issue the following command:
+You can use this mode to create an exact copy of an existing list. For example,
+to make an identical copy of "My Special List", you could issue the following
+command:
 
 ```shell
 msft-todo-backup restore "My Special List" --no-deduplication
@@ -239,7 +231,7 @@ msft-todo-backup restore "My Special List" --no-deduplication
 
 All existing lists and tasks will be deleted before the restoration process is
 performed. When using this mode, **all existing lists and tasks in the entire
-account will be irrecoverably destroyed**. Afterwards, the restoration process
+account will be irreversibly destroyed**. Afterwards, the restoration process
 will proceed as usual. While useful for performing a sort of "system restore" to
 return your lists back to a previous state in time, since this mode involves
 deletion of data, it is extremely dangerous and should be invoked only with the
