@@ -20,10 +20,7 @@ import {
   type JsonSparseEntryValueEndToken
 } from 'multiverse/stream-json-extended';
 
-import {
-  tokenizeObject,
-  feedTokenStream
-} from 'multiverse/stream-json-extended/test/setup';
+import { tokenizeObject, feedTokenStream } from 'multiverse/stream-json-extended/util';
 
 import type { DisassemblerOptions } from 'stream-json/Disassembler';
 import type { JsonValue } from 'type-fest';

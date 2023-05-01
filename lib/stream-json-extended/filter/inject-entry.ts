@@ -162,9 +162,9 @@ export function injectEntry({
      * before the {@link Readable} side is drained (see above), only call
      * `valueTokenStream.push()` within the
      * [`flush`](https://nodejs.org/api/stream.html#transform_flushcallback)
-     * method (for {@link Transform} instances) or within a
-     * [`'finish'`](https://nodejs.org/api/stream.html#event-finish) handler
-     * (for {@link Duplex} instances).
+     * method for {@link Transform} instances or within the
+     * [`final`](https://nodejs.org/api/stream.html#writable_finalcallback)
+     * method for {@link Duplex} instances.
      */
     valueTokenStreamFactory: () => Promisable<Readable>;
   };
@@ -240,11 +240,7 @@ export function injectEntry({
           // ? chunks and pump valueTokenStream before we start processing new
           // ? chunks. Synchronization is necessary here because the
           // ? passThroughToValueTokenStream and injectionStream streams share
-          // ? state (i.e. valueTokenStream).
-          // ?
-          // ? setImmediate is used instead of process.nextTick so safeCallback
-          // ? is scheduled after any awaited I/O or network requests while the
-          // ? rest of the pipeline chugs along.
+          // ? state (i.e. valueTokenStream). process.nextTick is not enough.
           setImmediate(() => safeCallback(error));
         };
 
@@ -313,8 +309,8 @@ export function injectEntry({
               if (!this.push(chunk)) {
                 localValueTokenStream.pause();
                 // ? Handle backpressure during unbounded chunk inflation. Use
-                // ? setImmediate to give whatever caused the pause a chance to
-                // ? resolve itself (especially if I/O or network-bound).
+                // ? setImmediate to give localValueTokenStream a chance to chew
+                // ? through the backlog.
                 // * https://stackoverflow.com/a/73474849/1367414
                 this.once('data', () =>
                   setImmediate(() => localValueTokenStream.resume())

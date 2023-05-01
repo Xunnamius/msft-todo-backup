@@ -16,10 +16,7 @@ import {
   type JsonPackedEntryToken
 } from 'multiverse/stream-json-extended';
 
-import {
-  feedTokenStream,
-  tokenizeObject
-} from 'multiverse/stream-json-extended/test/setup';
+import { feedTokenStream, tokenizeObject } from 'multiverse/stream-json-extended/util';
 
 import type { AnyFunction } from '@xunnamius/types';
 
@@ -623,6 +620,81 @@ describe('|>inject-entry', () => {
 
                           this.push(null);
                         });
+                      }
+                    })
+                  ],
+                  { objectMode: true }
+                );
+              }
+            }
+          })
+        )
+      ).resolves.toStrictEqual(
+        await tokenizeObject(
+          targetObjects.map((obj) => {
+            const returnValue =
+              'name' in obj
+                ? { name: `renamed-object-${obj.name.split('-').at(1) ?? '???'}` }
+                : { noname: true, name: null };
+
+            return returnValue as (typeof targetObjects)[number];
+          }),
+          { excludeFirstAndLast: true }
+        )
+      );
+
+      await expect(
+        feedTokenStream(
+          tokenizeObject(targetObjects, { excludeFirstAndLast: true }),
+          injectEntry({
+            entry: {
+              key: 'name',
+              valueTokenStreamFactory: () => {
+                const tokenBuffer: JsonToken[] = [];
+
+                return chain(
+                  [
+                    packEntry({ key: 'name', ownerSymbol }),
+                    new Duplex({
+                      objectMode: true,
+                      write(
+                        chunk: JsonToken | JsonPackedEntryToken,
+                        _encoding,
+                        callback
+                      ) {
+                        if (
+                          chunk.name === packedEntrySymbol &&
+                          chunk.owner === ownerSymbol
+                        ) {
+                          const updatedName =
+                            'renamed-object-' +
+                            ((chunk.value as string).split('-').at(1) || '???');
+
+                          void tokenizeObject(updatedName)
+                            .then((tokens) => {
+                              tokenBuffer.push(...tokens);
+                              callback(null);
+                            })
+                            .catch((error) => callback(error));
+                        } else {
+                          callback(null);
+                        }
+                      },
+                      read() {
+                        // Ain't nobody here but us chickens!
+                      },
+                      final(callback) {
+                        if (tokenBuffer.length) {
+                          tokenBuffer.forEach((token) => this.push(token));
+                        } else {
+                          this.push({
+                            name: 'nullValue',
+                            value: null
+                          } satisfies JsonToken);
+                        }
+
+                        this.push(null);
+                        callback(null);
                       }
                     })
                   ],

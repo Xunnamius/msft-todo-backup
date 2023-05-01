@@ -1,3 +1,5 @@
+import type { JsonValue } from 'type-fest';
+
 export type JsonStreamedKeyTokenName = 'startKey' | 'endKey';
 
 export type JsonStreamedPrimitiveTokenName =
@@ -46,3 +48,5 @@ export type JsonToken =
   | { name: Extract<JsonTokenWithValueName, 'trueValue'>; value: true }
   | { name: Extract<JsonTokenWithValueName, 'falseValue'>; value: false }
   | { name: JsonTokenWithoutValueName; value?: undefined };
+
+export type GenericJsonToken = JsonToken | { name: string | symbol; value?: JsonValue };

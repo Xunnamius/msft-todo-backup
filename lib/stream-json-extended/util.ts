@@ -4,10 +4,10 @@ import { Readable, type Duplex } from 'node:stream';
 import { disassembler, type DisassemblerOptions } from 'stream-json/Disassembler';
 import { chain } from 'stream-chain';
 
-import type { JsonToken } from 'multiverse/stream-json-extended';
+import type { GenericJsonToken, JsonToken } from 'multiverse/stream-json-extended';
 import type { JsonValue, Promisable } from 'type-fest';
 
-export function tokenizeObject(
+export async function tokenizeObject(
   object: JsonValue,
   options?: DisassemblerOptions & { excludeFirstAndLast?: boolean }
 ): Promise<JsonToken[]> {
@@ -15,7 +15,7 @@ export function tokenizeObject(
 
   // ? ObjectMode streams cannot handle raw null values
   if (object === null) {
-    return Promise.resolve([{ name: 'nullValue', value: null }]);
+    return [{ name: 'nullValue', value: null }];
   }
 
   return chain([Readable.from([object]), disassembler(disassemblerOptions)])
@@ -24,8 +24,8 @@ export function tokenizeObject(
 }
 
 export async function feedTokenStream(
-  tokenQueue: Promisable<JsonToken[]>,
+  tokenQueue: Promisable<GenericJsonToken[]>,
   stream: Duplex
-): Promise<JsonToken[]> {
+): Promise<GenericJsonToken[]> {
   return chain([Readable.from(await tokenQueue), stream]).toArray();
 }
