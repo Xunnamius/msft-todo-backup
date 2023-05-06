@@ -1,6 +1,6 @@
 import {
   type Readable,
-  Transform,
+  type Transform,
   type TransformOptions,
   type Duplex,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -18,6 +18,10 @@ import {
   omitEntry
 } from 'multiverse/stream-json-extended';
 
+import {
+  type InflationStream,
+  createInflationStream
+} from 'multiverse/create-inflation-stream';
 import { escapeRegExp } from 'multiverse/escape-regexp';
 import { makeSafeCallback } from 'multiverse/make-safe-callback';
 
@@ -226,22 +230,26 @@ export function injectEntry({
   let waitingForTheEndStack: ReturnType<typeof getStack> | undefined;
   let valueTokenStream: Readable | undefined = undefined;
 
-  const passThroughToValueTokenStream = new Transform({
+  const passThroughToValueTokenStream = createInflationStream({
     ...transformOptions,
     objectMode: true,
     async transform(chunk, encoding, callback_) {
       const safeCallback = makeSafeCallback(callback_);
 
       const advanceToNext: Parameters<typeof Transform.prototype._transform>[2] =
-        function (this: Transform, error) {
-          this.push(chunk);
-
-          // ? This is required to let the rest of the pipeline process our
-          // ? chunks and pump valueTokenStream before we start processing new
-          // ? chunks. Synchronization is necessary here because the
-          // ? passThroughToValueTokenStream and injectionStream streams share
-          // ? state (i.e. valueTokenStream). process.nextTick is not enough.
-          setImmediate(() => safeCallback(error));
+        function (this: InflationStream, error) {
+          if (error) {
+            safeCallback(error);
+          } else {
+            this.pushMany([chunk], (error_) => {
+              // ? This is required to let the rest of the pipeline process our
+              // ? chunks and pump valueTokenStream before we start processing new
+              // ? chunks. Synchronization is necessary here because the
+              // ? passThroughToValueTokenStream and injectionStream streams share
+              // ? state (i.e. valueTokenStream). process.nextTick is not enough.
+              setImmediate(() => safeCallback(error_));
+            });
+          }
         };
 
       try {
@@ -268,7 +276,7 @@ export function injectEntry({
     }
   });
 
-  const injectionStream = new Transform({
+  const injectionStream = createInflationStream({
     ...transformOptions,
     objectMode: true,
     transform(chunk: JsonToken, _encoding, callback_) {
@@ -298,23 +306,28 @@ export function injectEntry({
                 { name: 'endKey' }
               ];
 
+              // ? Since it's only three tokens and callback is not invoked
+              // ? until the value token stream ends, not using pushMany is okay
+              // ? here.
               tokens.forEach((token) => this.push(token));
             }
 
             if (packKeys) {
+              // ? Since it's only one token and callback is not invoked until
+              // ? the value token stream ends, not using pushMany is okay here.
               this.push({ name: 'keyValue', value: key } satisfies JsonToken);
             }
 
             const onData = (chunk: unknown) => {
+              // * Backpressure is inflicted on the pipeline right here!
               if (!this.push(chunk)) {
                 localValueTokenStream.pause();
-                // ? Handle backpressure during unbounded chunk inflation. Use
-                // ? setImmediate to give localValueTokenStream a chance to chew
-                // ? through the backlog.
-                // * https://stackoverflow.com/a/73474849/1367414
-                this.once('data', () =>
-                  setImmediate(() => localValueTokenStream.resume())
-                );
+                this.once('flow', () => {
+                  // ? Handle backpressure during unbounded chunk inflation. Use
+                  // ? setImmediate to give localValueTokenStream a chance to
+                  // ? chew through the backlog.
+                  setImmediate(() => localValueTokenStream.resume());
+                });
               }
             };
 
@@ -323,6 +336,7 @@ export function injectEntry({
               localValueTokenStream.removeListener('end', onEnd);
               localValueTokenStream.removeListener('data', onData);
 
+              // ? Since it's only one token, not using pushMany is okay here.
               this.push(chunk);
               safeCallback(error);
             };
@@ -331,15 +345,17 @@ export function injectEntry({
             localValueTokenStream.on('end', onEnd);
             localValueTokenStream.on('data', onData);
 
-            // ? If the stream was handed to us in an unreadable state, do
-            // ? cleanup immediately.
             if (!localValueTokenStream.readable) {
+              // ? If the stream was handed to us in an unreadable state, do
+              // ? cleanup immediately.
               onEnd(
                 localValueTokenStream.readable === undefined
                   ? new Error('value token stream is not a Readable')
                   : new Error('value token stream is not readable')
               );
             } else if (localValueTokenStreamIsAWritable) {
+              // ? The injection stream will wait for the value token stream to
+              // ? end before any other writes are accepted.
               (localValueTokenStream as Duplex).end();
             }
 
@@ -364,8 +380,7 @@ export function injectEntry({
           }
         }
 
-        this.push(chunk);
-        safeCallback(null);
+        this.pushMany([chunk], (error) => safeCallback(error));
       } catch (error) {
         safeCallback(isNativeError(error) ? error : new Error(String(error)));
       }

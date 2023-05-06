@@ -5,16 +5,22 @@ import isDeepSubset from 'lodash.ismatch';
 import { chain } from 'stream-chain';
 
 import {
-  type JsonToken,
   packEntry,
-  type JsonPackedEntryToken,
   packedEntrySymbol,
-  useDepthTracking
+  useDepthTracking,
+  type JsonToken,
+  type JsonPackedEntryToken
 } from 'multiverse/stream-json-extended';
 
 import { makeSafeCallback } from 'multiverse/make-safe-callback';
 
 import type { JsonValue } from 'type-fest';
+import {
+  createInflationStream,
+  NodeStyleCallback,
+  type InflationStream,
+  type InflationStreamOptions
+} from 'multiverse/create-inflation-stream';
 
 /**
  * A predicate function representing an object entry (key-value) filter
@@ -54,7 +60,7 @@ export function objectSieve({
   filter,
   pathSeparator = '.',
   ...transformOptions
-}: TransformOptions & {
+}: InflationStreamOptions & {
   /**
    * Objects in the {@link JsonToken} stream lacking entries that match at least
    * one of the provided key-value pairs will have its constituent tokens
@@ -108,16 +114,6 @@ export function objectSieve({
   let isDiscarding = false;
   let isReleasing = true;
 
-  const releaseBuffer = function (this: Transform) {
-    if (tokenBuffer.length) {
-      // ! Is this memory-safe? Probably, because we're moving data from
-      // ! one cache (tokenBuffer) to another (internal stream buffer)
-      for (let index = 0, length = tokenBuffer.length; index < length; ++index) {
-        this.push(tokenBuffer.shift());
-      }
-    }
-  };
-
   const discardBuffer = function () {
     if (tokenBuffer.length) {
       // ? Making sure the objects in the array are garbage collected
@@ -128,7 +124,7 @@ export function objectSieve({
   return chain(
     [
       packEntry({ key: filter.map(([key]) => key), ownerSymbol, pathSeparator }),
-      new Transform({
+      createInflationStream({
         ...transformOptions,
         objectMode: true,
         transform(chunk: JsonToken | JsonPackedEntryToken, _encoding, callback_) {
@@ -143,6 +139,68 @@ export function objectSieve({
             const isStartOfRootObject = getDepth() === 1 && chunk.name === 'startObject';
             const isEndOfRootObject = getDepth() === 0 && chunk.name === 'endObject';
 
+            const finish: NodeStyleCallback = (error) => {
+              if (error) {
+                safeCallback(error);
+              } else {
+                if (!isDiscarding && !isReleasing) {
+                  // ? Since we're current undecided on if we're letting this object
+                  // ? through the sieve or not, let's attempt to make a decision.
+
+                  if (isOwnPackedEntry) {
+                    const entryFilter = filter.find(([key]) => key === chunk.matcher);
+
+                    if (entryFilter) {
+                      const [, entryValueFilter] = entryFilter;
+
+                      const passesValueFilterFn =
+                        typeof entryValueFilter === 'function' &&
+                        entryValueFilter(chunk.value);
+
+                      const isADeepSubset =
+                        chunk.value !== null &&
+                        entryValueFilter !== null &&
+                        typeof chunk.value === 'object' &&
+                        typeof entryValueFilter === 'object' &&
+                        isDeepSubset(chunk.value, entryValueFilter);
+
+                      if (
+                        chunk.value === entryValueFilter ||
+                        passesValueFilterFn ||
+                        isADeepSubset
+                      ) {
+                        // ? This filter matched! Send the current root object
+                        // ? downstream.
+                        isReleasing = true;
+                      } else if (
+                        filter.length === 1 &&
+                        typeof filter[0][0] === 'string'
+                      ) {
+                        // * Optimization
+                        // ? This filter did not match. Since this is the only
+                        // ? filter that could have matched this entry key (filter
+                        // ? key is not a regular expression), start discarding the
+                        // ? current root object immediately.
+                        isDiscarding = true;
+                      }
+                    }
+                  } else {
+                    // ? We're still undecided. Try to make a decision later.
+                    tokenBuffer.push(chunk);
+                  }
+                }
+
+                if (isEndOfRootObject) {
+                  // ? We've reached the end of a root object. Prepare to accept and
+                  // ? potentially release the next token.
+                  isDiscarding = false;
+                  isReleasing = true;
+                }
+
+                safeCallback(null);
+              }
+            };
+
             if (isStartOfRootObject) {
               isDiscarding = false;
               isReleasing = false;
@@ -155,64 +213,18 @@ export function objectSieve({
             if (isDiscarding) {
               discardBuffer();
             } else if (isReleasing) {
-              releaseBuffer.call(this);
               if (!isOwnPackedEntry) {
-                this.push(chunk);
-              }
-            }
-
-            if (!isDiscarding && !isReleasing) {
-              // ? Since we're current undecided on if we're letting this object
-              // ? through the sieve or not, let's attempt to make a decision.
-
-              if (isOwnPackedEntry) {
-                const entryFilter = filter.find(([key]) => key === chunk.matcher);
-
-                if (entryFilter) {
-                  const [, entryValueFilter] = entryFilter;
-
-                  const passesValueFilterFn =
-                    typeof entryValueFilter === 'function' &&
-                    entryValueFilter(chunk.value);
-
-                  const isADeepSubset =
-                    chunk.value !== null &&
-                    entryValueFilter !== null &&
-                    typeof chunk.value === 'object' &&
-                    typeof entryValueFilter === 'object' &&
-                    isDeepSubset(chunk.value, entryValueFilter);
-
-                  if (
-                    chunk.value === entryValueFilter ||
-                    passesValueFilterFn ||
-                    isADeepSubset
-                  ) {
-                    // ? This filter matched! Send the current root object
-                    // ? downstream.
-                    isReleasing = true;
-                  } else if (filter.length === 1 && typeof filter[0][0] === 'string') {
-                    // * Optimization
-                    // ? This filter did not match. Since this is the only
-                    // ? filter that could have matched this entry key (filter
-                    // ? key is not a regular expression), start discarding the
-                    // ? current root object immediately.
-                    isDiscarding = true;
-                  }
-                }
-              } else {
-                // ? We're still undecided. Try to make a decision later.
                 tokenBuffer.push(chunk);
               }
+
+              // ? Release the buffer contents downstream
+              return this.pushMany(tokenBuffer, (error) => {
+                discardBuffer();
+                finish(error);
+              });
             }
 
-            if (isEndOfRootObject) {
-              // ? We've reached the end of a root object. Prepare to accept and
-              // ? potentially release the next token.
-              isDiscarding = false;
-              isReleasing = true;
-            }
-
-            safeCallback(null);
+            finish(null);
           } catch (error) {
             safeCallback(isNativeError(error) ? error : new Error(String(error)));
           }

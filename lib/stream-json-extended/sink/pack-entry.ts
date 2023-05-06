@@ -13,6 +13,11 @@ import {
 import { makeSafeCallback } from 'multiverse/make-safe-callback';
 
 import type { JsonValue } from 'type-fest';
+import {
+  createInflationStream,
+  type InflationStream,
+  type NodeStyleCallback
+} from 'multiverse/create-inflation-stream';
 
 /**
  * This symbol the `name` of every {@link JsonPackedEntryToken}.
@@ -227,12 +232,14 @@ export function packEntry({
   const keyTokenBuffer: (JsonToken | JsonSparseEntryToken)[] = [];
   const keys = [key].flat();
 
-  const releaseKeyTokenBuffer = function (this: Transform) {
-    // ! Is this memory-safe? Probably, because we're moving data from
-    // ! one cache (keyTokenBuffer) to another (internal stream buffer)
-    for (let index = 0, length = keyTokenBuffer.length; index < length; ++index) {
-      this.push(keyTokenBuffer.shift());
-    }
+  const releaseKeyTokenBuffer = function (
+    this: InflationStream,
+    callback: NodeStyleCallback
+  ) {
+    this.pushMany(keyTokenBuffer, (error) => {
+      discardKeyTokenBuffer();
+      callback(error);
+    });
   };
 
   const discardKeyTokenBuffer = function () {
@@ -253,7 +260,7 @@ export function packEntry({
   let sawFirstValueChunk: boolean;
   let entryTokenBase: ReturnType<typeof getEntryTokenBase>;
 
-  return new Transform({
+  return createInflationStream({
     ...assemblerTransformOptions,
     objectMode: true,
     transform(chunk, _encoding, callback) {
@@ -262,7 +269,7 @@ export function packEntry({
   });
 
   function transform(
-    this: Transform,
+    this: InflationStream,
     chunk: JsonToken,
     callback_: Parameters<typeof Transform.prototype._transform>[2],
     isRerun = false
@@ -276,36 +283,43 @@ export function packEntry({
 
     try {
       if (packingState === 'finalizing-value') {
+        const tokens = [];
         const isOurValueToken =
           chunk.name === 'numberValue' || chunk.name === 'stringValue';
 
         if (isOurValueToken && !discardComponentTokens) {
-          this.push(chunk);
+          tokens.push(chunk);
         }
 
         if (sparseMode) {
-          this.push({
+          tokens.push({
             ...entryTokenBase,
             name: sparseEntryValueEndSymbol
           } satisfies JsonSparseEntryValueEndToken);
         } else {
-          this.push({
+          tokens.push({
             ...entryTokenBase,
             name: packedEntrySymbol,
             value: assembler.current
           } satisfies JsonPackedEntryToken);
         }
 
-        // ? Return to idle state.
-        packingState = 'idle';
+        this.pushMany(tokens, (error) => {
+          // ? Return to idle state.
+          packingState = 'idle';
 
-        if (!isOurValueToken) {
-          // ? If chunk isn't a numberValue or stringValue (so it's not our
-          // ? value token), then run it through the transformer again lest we
-          // ? lose it.
-          return transform.call(this, chunk, safeCallback, true);
-        }
+          if (!isOurValueToken) {
+            // ? If chunk isn't a numberValue or stringValue (so it's not our
+            // ? value token), then run it through the transformer again lest we
+            // ? lose it.
+            transform.call(this, chunk, safeCallback, true);
+          } else {
+            safeCallback(error);
+          }
+        });
       } else if (packingState === 'packing-value') {
+        const tokens = [];
+
         typeSafeConsume(assembler, chunk);
 
         const isFirstValueChunk = !sawFirstValueChunk;
@@ -317,15 +331,17 @@ export function packEntry({
         }
 
         if (sparseMode && isFirstValueChunk) {
-          this.push({
+          tokens.push({
             ...entryTokenBase,
             name: sparseEntryValueStartSymbol
           } satisfies JsonSparseEntryValueStartToken);
         }
 
         if (!discardComponentTokens) {
-          this.push(chunk);
+          tokens.push(chunk);
         }
+
+        this.pushMany(tokens, (error) => safeCallback(error));
       } else if (packingState === 'finalizing-key') {
         if (chunk.name === 'keyValue') {
           keyTokenBuffer.push(chunk);
@@ -349,16 +365,19 @@ export function packEntry({
         }
 
         // ? Flush whatever's left of the key buffer.
-        releaseKeyTokenBuffer.call(this);
-        // ? Advance to the next state.
-        sawFirstValueChunk = false;
-        packingState = 'packing-value';
+        releaseKeyTokenBuffer.call(this, (error) => {
+          // ? Advance to the next state.
+          sawFirstValueChunk = false;
+          packingState = 'packing-value';
 
-        if (chunk.name !== 'keyValue') {
-          // ? If chunk isn't a keyValue (so it's a value token), then run it
-          // ? through the transformer again lest we lose it.
-          return transform.call(this, chunk, safeCallback, true);
-        }
+          if (chunk.name !== 'keyValue') {
+            // ? If chunk isn't a keyValue (so it's a value token), then run it
+            // ? through the transformer again lest we lose it.
+            transform.call(this, chunk, safeCallback, true);
+          } else {
+            safeCallback(error);
+          }
+        });
       } else if (
         keyTokenNames.includes(chunk.name as (typeof keyTokenNames)[number]) ||
         packingState === 'packing-key'
@@ -384,17 +403,19 @@ export function packEntry({
             packingState = 'finalizing-key';
           } else {
             // ? If no match is found, flush the buffered tokens downstream.
-            releaseKeyTokenBuffer.call(this);
-            // ? Return to idle state.
-            packingState = 'idle';
+            return releaseKeyTokenBuffer.call(this, (error) => {
+              // ? Return to idle state.
+              packingState = 'idle';
+              safeCallback(error);
+            });
           }
         }
+
+        safeCallback(null);
       } else {
         // ? packingState === 'idle'
-        this.push(chunk);
+        this.pushMany([chunk], (error) => safeCallback(error));
       }
-
-      safeCallback(null);
     } catch (error) {
       safeCallback(isNativeError(error) ? error : new Error(String(error)));
     }

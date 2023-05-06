@@ -3,10 +3,9 @@ import { isPromise, isNativeError } from 'node:util/types';
 import { Transform, type TransformOptions } from 'node:stream';
 
 /**
- * This type represents a callback function invoked after `transform.pushMany`
- * is done `transform.push`-ing items into `transform.readableBuffer`.
+ * This type represents a typical Node.js-style callback function.
  */
-export type PushManyCallback = (error: Error | null | undefined) => void;
+export type NodeStyleCallback = (error: Error | null | undefined) => void;
 
 type PushManyChunks =
   | any[]
@@ -30,7 +29,7 @@ interface PushManyInterface {
   pushMany(
     this: InflationStream,
     chunks: PushManyChunks,
-    callback?: PushManyCallback
+    callback?: NodeStyleCallback
   ): void;
   /**
    * This method is equivalent to `transform.push()` called back to back while
@@ -45,13 +44,13 @@ interface PushManyInterface {
     this: InflationStream,
     chunks: PushManyChunks,
     encoding?: BufferEncoding,
-    callback?: PushManyCallback
+    callback?: NodeStyleCallback
   ): void;
   pushMany(
     this: InflationStream,
     chunks: PushManyChunks,
-    encodingOrCallback?: BufferEncoding | PushManyCallback,
-    callback?: PushManyCallback
+    encodingOrCallback?: BufferEncoding | NodeStyleCallback,
+    callback?: NodeStyleCallback
   ): void;
 }
 
@@ -108,7 +107,7 @@ const pushMany: PushManyInterface['pushMany'] = function (...args) {
     if (maybeCallback !== undefined) {
       return [
         maybeEncodingOrCallback as BufferEncoding | undefined,
-        maybeCallback as PushManyCallback
+        maybeCallback as NodeStyleCallback
       ];
     } else if (typeof maybeEncodingOrCallback === 'function') {
       return [undefined, maybeEncodingOrCallback];
