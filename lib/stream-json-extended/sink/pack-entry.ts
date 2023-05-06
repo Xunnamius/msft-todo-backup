@@ -1,6 +1,11 @@
 import assert from 'node:assert';
 import { isNativeError } from 'node:util/types';
-import { Transform, type TransformOptions } from 'node:stream';
+
+import {
+  createInflationStream,
+  type InflationStream,
+  type NodeStyleCallback
+} from 'multiverse/create-inflation-stream';
 
 import {
   FullAssembler,
@@ -13,11 +18,7 @@ import {
 import { makeSafeCallback } from 'multiverse/make-safe-callback';
 
 import type { JsonValue } from 'type-fest';
-import {
-  createInflationStream,
-  type InflationStream,
-  type NodeStyleCallback
-} from 'multiverse/create-inflation-stream';
+import type { Transform, TransformOptions } from 'node:stream';
 
 /**
  * This symbol the `name` of every {@link JsonPackedEntryToken}.
@@ -414,7 +415,8 @@ export function packEntry({
         safeCallback(null);
       } else {
         // ? packingState === 'idle'
-        this.pushMany([chunk], (error) => safeCallback(error));
+        this.push(chunk);
+        safeCallback(null);
       }
     } catch (error) {
       safeCallback(isNativeError(error) ? error : new Error(String(error)));

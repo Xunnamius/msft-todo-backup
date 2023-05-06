@@ -25,6 +25,11 @@ interface PushManyInterface {
    * after all `transform.push` operations are completed. This is useful if
    * `transform.pushMany` is provided one or more chunks that resolve
    * asynchronously (e.g. `AsyncGeneratorFunction` or `AsyncIterable`).
+   *
+   * If your `transform._transform` method is only pushing a single chunk once
+   * per invocation, you likely want to stick with the normal `transform.push`
+   * method. `transform.pushMany` is useful when pushing more than one chunk (or
+   * even infinity chunks) per `transform._transform` invocation.
    */
   pushMany(
     this: InflationStream,
@@ -39,6 +44,11 @@ interface PushManyInterface {
    * after all `transform.push` operations are completed. This is useful if
    * `transform.pushMany` is provided one or more chunks that resolve
    * asynchronously (e.g. `AsyncGeneratorFunction` or `AsyncIterable`).
+   *
+   * If your `transform._transform` method is only pushing a single chunk once
+   * per invocation, you likely want to stick with the normal `transform.push`
+   * method. `transform.pushMany` is useful when pushing more than one chunk (or
+   * even infinity chunks) per `transform._transform` invocation.
    */
   pushMany(
     this: InflationStream,
@@ -80,15 +90,24 @@ export type InflationStreamOptions = {
  * that `transform.pushMany()` is implemented.
  *
  * `InflationStream`s are useful when inflating chunks in an unbounded or
- * semi-bounded way with the assumption that, _from within a `'flow'` event
- * handler_, this stream never consumes (i.e. `this.read()`) chunks that it
- * itself pushed into its own internal `readable.readableBuffer`, which would be
- * nonsensical anyway.
+ * semi-bounded way.
  *
- * The algorithm used here is preferable to the [clever `stream.once('data',
- * ...)` method](https://stackoverflow.com/a/73474849/1367414). This is because
- * said method can cause catastrophic heisenbugs when the stream is being
- * written into when it does not already have any `'data'` handlers attached.
+ * If your `transform._transform` method only pushes a single chunk per
+ * invocation, and you're not manually connecting streams (instead of calling
+ * `stream.pipe()`), then you probably don't need to use an `InflationStream`
+ * since normal `Transform`s handle backpressure from single-push
+ * `transform._transform` invocations already. `InflationStream`s are useful
+ * when your `transform._transform` method might push more than one chunk per
+ * invocation.
+ *
+ * The algorithm used here is preferable to the [`this.once('data', ...)`
+ * method](https://stackoverflow.com/a/73474849/1367414). This is because said
+ * method can cause catastrophic heisenbugs when the stream is being written
+ * into when it does not already have any `'data'` handlers attached.
+ *
+ * NOTE: it is assumed that, _from within a `'flow'` event handler_, this stream
+ * never consumes (i.e. `this.read()`) chunks that it itself pushed into its own
+ * internal `readable.readableBuffer`, which would be nonsensical anyway.
  */
 export function createInflationStream(transformOptions: InflationStreamOptions) {
   const transform = new Transform(transformOptions) as InflationStream;

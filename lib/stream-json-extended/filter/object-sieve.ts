@@ -1,4 +1,3 @@
-import { Transform, type TransformOptions } from 'node:stream';
 import { isNativeError } from 'node:util/types';
 
 import isDeepSubset from 'lodash.ismatch';
@@ -17,8 +16,7 @@ import { makeSafeCallback } from 'multiverse/make-safe-callback';
 import type { JsonValue } from 'type-fest';
 import {
   createInflationStream,
-  NodeStyleCallback,
-  type InflationStream,
+  type NodeStyleCallback,
   type InflationStreamOptions
 } from 'multiverse/create-inflation-stream';
 

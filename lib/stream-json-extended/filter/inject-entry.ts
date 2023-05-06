@@ -238,18 +238,14 @@ export function injectEntry({
 
       const advanceToNext: Parameters<typeof Transform.prototype._transform>[2] =
         function (this: InflationStream, error) {
-          if (error) {
-            safeCallback(error);
-          } else {
-            this.pushMany([chunk], (error_) => {
-              // ? This is required to let the rest of the pipeline process our
-              // ? chunks and pump valueTokenStream before we start processing new
-              // ? chunks. Synchronization is necessary here because the
-              // ? passThroughToValueTokenStream and injectionStream streams share
-              // ? state (i.e. valueTokenStream). process.nextTick is not enough.
-              setImmediate(() => safeCallback(error_));
-            });
-          }
+          this.push(chunk);
+
+          // ? This is required to let the rest of the pipeline process our
+          // ? chunks and pump valueTokenStream before we start processing new
+          // ? chunks. Synchronization is necessary here because the
+          // ? passThroughToValueTokenStream and injectionStream streams share
+          // ? state (i.e. valueTokenStream). process.nextTick is not enough.
+          setImmediate(() => safeCallback(error));
         };
 
       try {
@@ -380,7 +376,8 @@ export function injectEntry({
           }
         }
 
-        this.pushMany([chunk], (error) => safeCallback(error));
+        this.push(chunk);
+        safeCallback(null);
       } catch (error) {
         safeCallback(isNativeError(error) ? error : new Error(String(error)));
       }
