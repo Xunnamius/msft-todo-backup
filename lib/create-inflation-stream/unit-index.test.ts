@@ -457,4 +457,22 @@ describe('::makeInflatableTransform', () => {
       [null]
     ]);
   });
+
+  it('still calls callback when passed empty chunks array', async () => {
+    expect.assertions(2);
+
+    const inflationStream = createInflationStream({
+      transform(_chunk, encoding, callback) {
+        this.pushMany([], encoding, () => {
+          expect(true).toBeTrue();
+          callback(null);
+        });
+      }
+    });
+
+    inflationStream.write('x');
+    inflationStream.end();
+
+    await expect(inflationStream.toArray()).resolves.toBeEmpty();
+  });
 });
