@@ -1,10 +1,7 @@
 import { Writable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 
-import { chain } from 'stream-chain';
-
 import { createInflationStream } from 'multiverse/create-inflation-stream';
-import { tokenizeObject, feedTokenStream } from 'multiverse/stream-json-extended/util';
 
 describe('::makeInflatableTransform', () => {
   it('emits the "flow" event whenever _read is invoked', async () => {
@@ -271,10 +268,110 @@ describe('::makeInflatableTransform', () => {
 
   it('handles sync backpressure on the Readable side', async () => {
     expect.hasAssertions();
+
+    let countCheckpointReached = 0;
+
+    const inflationStream = createInflationStream({
+      objectMode: true,
+      highWaterMark: 2,
+      transform(chunk: string, encoding, callback) {
+        this.pushMany(
+          ['first: ' + chunk, 'second: ' + chunk, 'third: ' + chunk],
+          encoding,
+          (error) => {
+            countCheckpointReached += 1;
+            callback(error);
+          }
+        );
+      }
+    });
+
+    inflationStream.write('a');
+    inflationStream.write('b');
+
+    expect(countCheckpointReached).toBe(0);
+    expect(inflationStream.readableLength).toBe(2);
+    expect(inflationStream.read()).toBe('first: a');
+    expect(inflationStream.readableLength).toBe(2);
+    expect(countCheckpointReached).toBe(0);
+    expect(inflationStream.read()).toBe('second: a');
+    expect(inflationStream.readableLength).toBe(2);
+    expect(countCheckpointReached).toBe(1);
+    expect(inflationStream.read()).toBe('third: a');
+    expect(inflationStream.readableLength).toBe(2);
+    expect(countCheckpointReached).toBe(1);
+    expect(inflationStream.read()).toBe('first: b');
+    expect(inflationStream.readableLength).toBe(2);
+    expect(countCheckpointReached).toBe(1);
+    expect(inflationStream.read()).toBe('second: b');
+    expect(inflationStream.readableLength).toBe(1);
+    expect(countCheckpointReached).toBe(2);
+    expect(inflationStream.read()).toBe('third: b');
+    expect(inflationStream.readableLength).toBe(0);
+    expect(countCheckpointReached).toBe(2);
+    expect(inflationStream.read()).toBeNull();
+
+    inflationStream.end();
+    inflationStream.resume();
+
+    await finished(inflationStream);
   });
 
   it('handles async backpressure on the Readable side', async () => {
     expect.hasAssertions();
+
+    const results: string[] = [];
+    let countCheckpointReached = 0;
+
+    const inflationStream = createInflationStream({
+      objectMode: true,
+      highWaterMark: 2,
+      transform(chunk: string, _encoding, callback) {
+        this.pushMany(
+          async function* () {
+            yield 'first: ' + chunk;
+            yield 'second: ' + chunk;
+            yield 'third: ' + chunk;
+          },
+          (error) => {
+            countCheckpointReached += 1;
+            callback(error);
+          }
+        );
+      }
+    });
+
+    inflationStream.write('a', () => {
+      expect(countCheckpointReached).toBe(1);
+    });
+
+    inflationStream.write('b', () => {
+      expect(countCheckpointReached).toBe(2);
+    });
+
+    const writableStream = inflationStream.pipe(
+      new Writable({
+        objectMode: true,
+        highWaterMark: 1,
+        write(chunk, _encoding, callback) {
+          results.push(chunk);
+          callback(null);
+        }
+      })
+    );
+
+    inflationStream.end();
+
+    await finished(writableStream);
+
+    expect(results).toStrictEqual([
+      'first: a',
+      'second: a',
+      'third: a',
+      'first: b',
+      'second: b',
+      'third: b'
+    ]);
   });
 
   it('handles error in iterables and generator functions consumed by pushMany', async () => {

@@ -80,8 +80,11 @@ export type InflationStreamOptions = {
  * `transform._read()` method is invoked, and it is on top of this new event
  * that `transform.pushMany()` is implemented.
  *
- * This function is useful when inflating chunks in an unbounded and
- * semi-bounded way.
+ * `InflationStream`s are useful when inflating chunks in an unbounded or
+ * semi-bounded way with the assumption that, _from within a `'flow'` event
+ * handler_, this stream never consumes (i.e. `this.read()`) chunks that it
+ * itself pushed into its own internal `readable.readableBuffer`, which would be
+ * nonsensical anyway.
  *
  * The algorithm used here is preferable to the [clever `stream.once('data',
  * ...)` method](https://stackoverflow.com/a/73474849/1367414). This is because
@@ -179,7 +182,7 @@ function read(this: Transform, size: number) {
   // ? If nothing is pushed into readableBuffer, then allow the transform to
   // ? continue. Since every call to push triggers another call to _read, we
   // ? can count on the following condition becoming true eventually.
-  if (this.readableLength === readableLength) {
+  if (this.readableLength <= readableLength) {
     Transform.prototype._read.call(this, size);
   }
 }
