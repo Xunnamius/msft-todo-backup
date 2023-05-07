@@ -199,7 +199,7 @@
     "remark-renumber-references": "^1.0.5",
     "remark-sort-definitions": "^1.0.5",
     "remark-tight-comments": "^1.0.6",
-    "remark-validate-links": "^12.1.0",
+    "remark-validate-links": "^12.1.1",
     "semantic-release": "https://xunn.at/semantic-release-atam",
     "semver": "^7.5.0",
     "simple-git": "^3.18.0",
