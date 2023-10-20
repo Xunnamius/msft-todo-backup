@@ -201,7 +201,7 @@
     "remark-tight-comments": "^1.0.6",
     "remark-validate-links": "^12.1.0",
     "semantic-release": "https://xunn.at/semantic-release-atam",
-    "semver": "^7.5.0",
+    "semver": "^7.5.2",
     "simple-git": "^3.18.0",
     "sort-package-json": "https://xunn.at/sort-package-json",
     "source-map-support": "^0.5.21",
