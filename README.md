@@ -12,6 +12,9 @@
 
 # msft-todo-backup
 
+> Still a work in progress that I hope to finish before my anxiety overwhelms
+> as I compile thousands of treasured notes on Microsoft's systems...
+
 An NPM package allowing the export (backup) and import (restoration) of your
 precious Microsoft Todo tasks for the paranoid among us that aren't willing to
 risk a decade of notes on the whims and stability of Microsoft's services.
